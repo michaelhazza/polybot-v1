@@ -1,0 +1,44 @@
+{
+  "projectInfo": {
+    "name": "polymarket-arbitrage-mvp",
+    "type": "web_application",
+    "primaryLanguage": "javascript",
+    "framework": "express",
+    "frontend": "react"
+  },
+  "structure": {
+    "sourceDir": "server",
+    "serverDir": "server",
+    "clientDir": "src",
+    "testsDir": "tests",
+    "configDir": ".",
+    "docsDir": "."
+  },
+  "patterns": {
+    "routeFiles": ["**/routes/**/*.js", "server/routes/*.js"],
+    "serviceFiles": ["**/services/**/*.js", "server/services/*.js"],
+    "modelFiles": ["**/models/**/*.js", "server/database/*.js"],
+    "testFiles": ["**/*.test.js", "**/*.spec.js", "test-*.js"],
+    "configFiles": ["*.config.js", "vite.config.js"]
+  },
+  "technologies": {
+    "database": "sqlite",
+    "orm": "better-sqlite3",
+    "authLibrary": "none",
+    "testFramework": "none",
+    "bundler": "vite",
+    "runtime": "node"
+  },
+  "securityRules": {
+    "requireAuth": ["POST", "PUT", "DELETE", "PATCH"],
+    "passwordHashing": ["bcrypt", "argon2", "scrypt"],
+    "sessionManagement": "none",
+    "corsOrigins": ["*"]
+  },
+  "qualityThresholds": {
+    "testCoverage": 70,
+    "maxFileLength": 300,
+    "maxFunctionLength": 50,
+    "maxCyclomaticComplexity": 10
+  }
+}
