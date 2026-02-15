@@ -18,6 +18,24 @@ function parsePeriod(period) {
   return map[period] || 30;
 }
 
+router.get('/', (req, res) => {
+  try {
+    const downloads = db.prepare(`
+      SELECT d.id, d.asset, d.period, d.status, d.progress_pct, d.stage, d.error_message,
+             d.start_time, d.end_time, d.created_at, d.completed_at,
+             (SELECT COUNT(*) FROM downloaded_markets WHERE download_id = d.id) as market_count,
+             (SELECT COUNT(*) FROM downloaded_snapshots WHERE download_id = d.id) as snapshot_count
+      FROM data_downloads d
+      ORDER BY d.created_at DESC
+    `).all();
+
+    res.json(downloads);
+  } catch (error) {
+    console.error('Error listing downloads:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const { asset, period } = req.body;
