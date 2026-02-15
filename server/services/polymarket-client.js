@@ -11,82 +11,118 @@ class PolymarketClient {
         'Content-Type': 'application/json'
       }
     });
+    this.assetKeywords = {
+      'BTC': [/\bbitcoin\b/i, /\bbtc\b/i, /\$btc/i],
+      'ETH': [/\bethereum\b/i, /(?<![a-z])eth(?![a-z])/i, /\$eth/i],
+      'SOL': [/\bsolana\b/i, /(?<![a-z])sol(?![a-z])/i, /\$sol/i]
+    };
   }
 
   async fetchMarkets(asset, timeframe, startTime, endTime) {
     try {
-      const response = await this.client.get(`${GAMMA_API_BASE}/markets`, {
-        params: {
-          active: false,
-          closed: true,
-          limit: 1000
+      const keywords = this.assetKeywords[asset.toUpperCase()] || [asset.toLowerCase()];
+      const allMarkets = [];
+
+      for (let offset = 0; offset < 1000; offset += 100) {
+        const response = await this.client.get(`${GAMMA_API_BASE}/markets`, {
+          params: {
+            limit: 100,
+            offset,
+            active: true,
+            closed: false
+          }
+        });
+        const batch = response.data || [];
+        if (batch.length === 0) break;
+        allMarkets.push(...batch);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      console.log(`Fetched ${allMarkets.length} total markets from Gamma API`);
+
+      const filtered = allMarkets.filter(market => {
+        const question = market.question || '';
+        const assetMatch = keywords.some(kw => kw.test(question));
+        if (!assetMatch) return false;
+
+        const hasClobTokens = market.clobTokenIds && market.clobTokenIds !== '[]';
+        return hasClobTokens;
+      });
+
+      console.log(`Found ${filtered.length} markets matching ${asset} with CLOB tokens`);
+
+      return filtered.map(m => {
+        let tokenIds = [];
+        try {
+          tokenIds = JSON.parse(m.clobTokenIds || '[]');
+        } catch (e) {
+          tokenIds = [];
         }
-      });
 
-      const markets = response.data || [];
-      const filtered = markets.filter(market => {
-        const question = market.question?.toLowerCase() || '';
-        const assetMatch = question.includes(asset.toLowerCase());
-        const marketStart = market.startDate ? new Date(market.startDate).getTime() / 1000 : 0;
-        const marketEnd = market.endDate ? new Date(market.endDate).getTime() / 1000 : Date.now() / 1000;
-        const timeMatch = marketEnd >= startTime && marketStart <= endTime;
-        return assetMatch && timeMatch;
+        return {
+          market_id: m.conditionId || m.id,
+          question: m.question,
+          asset,
+          timeframe,
+          start_time: m.startDate ? Math.floor(new Date(m.startDate).getTime() / 1000) : startTime,
+          end_time: m.endDate ? Math.floor(new Date(m.endDate).getTime() / 1000) : endTime,
+          status: m.closed ? 'closed' : 'active',
+          fee_regime: 'fee_free',
+          clob_token_ids: tokenIds
+        };
       });
-
-      return filtered.map(m => ({
-        market_id: m.condition_id || m.id,
-        asset,
-        timeframe,
-        start_time: m.startDate ? Math.floor(new Date(m.startDate).getTime() / 1000) : startTime,
-        end_time: m.endDate ? Math.floor(new Date(m.endDate).getTime() / 1000) : endTime,
-        status: m.closed ? 'closed' : 'active',
-        fee_regime: 'fee_free'
-      }));
     } catch (error) {
       console.error('Error fetching markets:', error.message);
       return [];
     }
   }
 
-  async fetchSnapshots(marketId, startTime, endTime) {
+  async fetchSnapshots(market, startTime, endTime) {
     try {
-      const response = await this.client.get(`${POLYMARKET_API_BASE}/prices`, {
-        params: {
-          market: marketId,
-          startTs: startTime,
-          endTs: endTime
-        }
-      });
-
-      const snapshots = [];
-      const data = response.data?.history || [];
-
-      for (const point of data) {
-        const timestamp = Math.floor(point.t || point.timestamp || Date.now() / 1000);
-        if (point.p !== undefined || point.price !== undefined) {
-          const mid = point.p || point.price;
-          snapshots.push({
-            market_id: marketId,
-            timestamp,
-            side: 'UP',
-            mid,
-            last: mid,
-            is_tradable: 1
-          });
-          snapshots.push({
-            market_id: marketId,
-            timestamp,
-            side: 'DOWN',
-            mid: 1 - mid,
-            last: 1 - mid,
-            is_tradable: 1
-          });
-        }
+      const tokenIds = market.clob_token_ids || [];
+      if (tokenIds.length === 0) {
+        console.warn(`No CLOB token IDs for market ${market.market_id}`);
+        return [];
       }
 
-      return snapshots;
+      const allSnapshots = [];
+
+      for (let i = 0; i < tokenIds.length; i++) {
+        const tokenId = tokenIds[i];
+        const side = i === 0 ? 'YES' : 'NO';
+
+        const response = await this.client.get(`${POLYMARKET_API_BASE}/prices-history`, {
+          params: {
+            market: tokenId,
+            interval: 'max',
+            fidelity: 60
+          }
+        });
+
+        const data = response.data?.history || [];
+        console.log(`  Token ${side} (${tokenId.substring(0, 20)}...): ${data.length} price points`);
+
+        for (const point of data) {
+          const timestamp = point.t;
+          const price = typeof point.p === 'string' ? parseFloat(point.p) : point.p;
+          if (timestamp && price !== undefined) {
+            allSnapshots.push({
+              market_id: market.market_id,
+              timestamp,
+              side,
+              mid: price,
+              last: price,
+              is_tradable: 1
+            });
+          }
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      return allSnapshots;
     } catch (error) {
-      console.error(`Error fetching snapshots for ${marketId}:`, error.message);
+      console.error(`Error fetching snapshots for ${market.market_id}:`, error.message);
       return [];
     }
   }

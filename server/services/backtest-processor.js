@@ -202,11 +202,10 @@ class BacktestProcessor {
         );
       }
 
-      // Fetch snapshots for each market
       const allSnapshots = [];
       for (const market of limitedMarkets) {
         const snapshots = await polymarketClient.fetchSnapshots(
-          market.market_id,
+          market,
           run.analysis_start,
           run.analysis_end
         );

@@ -322,13 +322,14 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
           return;
         }
 
+        const marketLabel = market.question ? market.question.substring(0, 50) : market.market_id;
         updateProgress(
           10 + (i * progressPerMarket),
-          `Fetching data for market ${i + 1}/${markets.length}...`
+          `Fetching data for market ${i + 1}/${markets.length}: ${marketLabel}...`
         );
 
         const snapshots = await polymarketClient.fetchSnapshots(
-          market.market_id,
+          market,
           startTime,
           endTime
         );
