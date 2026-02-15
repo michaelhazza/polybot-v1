@@ -238,6 +238,49 @@ router.delete('/:id', (req, res) => {
   }
 });
 
+router.delete('/by-asset', (req, res) => {
+  try {
+    const { asset, period } = req.body;
+
+    if (!asset) {
+      return res.status(400).json({ error: 'Missing required field: asset' });
+    }
+
+    let downloads;
+    if (period) {
+      downloads = db.prepare(`
+        SELECT id FROM data_downloads WHERE asset = ? AND period = ?
+      `).all(asset, period);
+    } else {
+      downloads = db.prepare(`
+        SELECT id FROM data_downloads WHERE asset = ?
+      `).all(asset);
+    }
+
+    if (downloads.length === 0) {
+      return res.json({ success: true, deleted: 0, message: 'No data found to clear' });
+    }
+
+    const ids = downloads.map(d => d.id);
+
+    const transaction = db.transaction(() => {
+      for (const id of ids) {
+        db.prepare('DELETE FROM downloaded_snapshots WHERE download_id = ?').run(id);
+        db.prepare('DELETE FROM downloaded_markets WHERE download_id = ?').run(id);
+        db.prepare('DELETE FROM data_downloads WHERE id = ?').run(id);
+      }
+    });
+
+    transaction();
+
+    const label = period ? `${asset} / ${period}` : asset;
+    res.json({ success: true, deleted: ids.length, message: `Cleared ${ids.length} download(s) for ${label}` });
+  } catch (error) {
+    console.error('Error clearing data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/:id/stop', (req, res) => {
   try {
     const { id } = req.params;
