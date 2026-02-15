@@ -13,7 +13,10 @@ function parsePeriod(period) {
     '30d': 30,
     '60d': 60,
     '3m': 90,
-    '6m': 180
+    '6m': 180,
+    '12m': 365,
+    '24m': 730,
+    '36m': 1095
   };
   return map[period] || 30;
 }

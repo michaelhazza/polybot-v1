@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 
 const ASSET_LABELS = { BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana' };
-const PERIOD_LABELS = { '7d': '7 days', '30d': '30 days', '60d': '60 days', '3m': '3 months', '6m': '6 months' };
+const PERIOD_LABELS = { '7d': '7 days', '30d': '30 days', '60d': '60 days', '3m': '3 months', '6m': '6 months', '12m': '12 months', '24m': '24 months', '36m': '36 months' };
 
 function DataDownload() {
   const [formData, setFormData] = useState({ asset: 'BTC', period: '30d' });
@@ -236,6 +236,9 @@ function DataDownload() {
                 <option value="60d">60 days</option>
                 <option value="3m">3 months</option>
                 <option value="6m">6 months</option>
+                <option value="12m">12 months</option>
+                <option value="24m">24 months</option>
+                <option value="36m">36 months</option>
               </select>
             </div>
           </div>
