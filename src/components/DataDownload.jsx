@@ -493,6 +493,19 @@ function ExpandedDataView({ data, dl, activeTab, selectedMarket, onSetTab, onSet
   );
 }
 
+function getDateTicks(paired, numTicks = 6) {
+  if (paired.length < 2) return [];
+  const ticks = [];
+  for (let i = 0; i < numTicks; i++) {
+    const idx = Math.round((i / (numTicks - 1)) * (paired.length - 1));
+    const ts = paired[idx].timestamp;
+    const d = new Date(ts * 1000);
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    ticks.push({ idx, label, frac: idx / (paired.length - 1) });
+  }
+  return ticks;
+}
+
 function ArbitrageView({ marketData }) {
   const markets = Object.values(marketData.marketMap);
   const colors = ['#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
@@ -536,8 +549,8 @@ function ArbitrageView({ marketData }) {
               )}
             </div>
 
-            <svg viewBox="0 0 800 200" preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 'auto' }}>
-              <rect width="800" height="200" fill="#0f172a" rx="4" />
+            <svg viewBox="0 0 800 230" preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 'auto' }}>
+              <rect width="800" height="230" fill="#0f172a" rx="4" />
               {(() => {
                 const oneY = 180 - ((1.0 - chartMin) / chartRange) * 160;
                 return (
@@ -553,6 +566,15 @@ function ArbitrageView({ marketData }) {
                   <g key={i}>
                     <line x1="50" y1={y} x2="760" y2={y} stroke="#1e293b" strokeWidth="1" />
                     <text x="45" y={y + 4} fill="#64748b" fontSize="9" textAnchor="end">{val.toFixed(3)}</text>
+                  </g>
+                );
+              })}
+              {getDateTicks(paired).map((tick, i) => {
+                const x = 50 + tick.frac * 710;
+                return (
+                  <g key={`dt-${i}`}>
+                    <line x1={x} y1={180} x2={x} y2={185} stroke="#475569" strokeWidth="1" />
+                    <text x={x} y={200} fill="#94a3b8" fontSize="9" textAnchor="middle">{tick.label}</text>
                   </g>
                 );
               })}
@@ -616,14 +638,23 @@ function ChartView({ marketData, paired, selectedMarket, onSetMarket, asset }) {
         <div className="stat"><label>Paired Points:</label><span>{paired.length.toLocaleString()}</span></div>
         <div className="stat"><label>Time Range:</label><span>{new Date(paired[0].timestamp * 1000).toLocaleDateString()} - {new Date(paired[paired.length - 1].timestamp * 1000).toLocaleDateString()}</span></div>
       </div>
-      <svg className="price-chart" viewBox="0 0 800 400" preserveAspectRatio="xMidYMid meet">
-        <rect width="800" height="400" fill="#1e293b" />
+      <svg className="price-chart" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid meet">
+        <rect width="800" height="420" fill="#1e293b" />
         {[0, 0.25, 0.5, 0.75, 1.0].map((y, i) => (
           <g key={i}>
             <line x1="50" y1={50 + (1 - y) * 300} x2="750" y2={50 + (1 - y) * 300} stroke="#334155" strokeWidth="1" />
             <text x="35" y={50 + (1 - y) * 300 + 5} fill="#94a3b8" fontSize="12" textAnchor="end">{(y * 100).toFixed(0)}%</text>
           </g>
         ))}
+        {getDateTicks(paired, 8).map((tick, i) => {
+          const x = 50 + tick.frac * 700;
+          return (
+            <g key={`dt-${i}`}>
+              <line x1={x} y1={350} x2={x} y2={356} stroke="#475569" strokeWidth="1" />
+              <text x={x} y={372} fill="#94a3b8" fontSize="10" textAnchor="middle">{tick.label}</text>
+            </g>
+          );
+        })}
         <polyline
           points={paired.map((p, i) => `${50 + (i / Math.max(paired.length - 1, 1)) * 700},${350 - (p.yes * 300)}`).join(' ')}
           fill="none" stroke="#3b82f6" strokeWidth="2"
@@ -632,7 +663,6 @@ function ChartView({ marketData, paired, selectedMarket, onSetMarket, asset }) {
           points={paired.map((p, i) => `${50 + (i / Math.max(paired.length - 1, 1)) * 700},${350 - (p.no * 300)}`).join(' ')}
           fill="none" stroke="#ef4444" strokeWidth="2"
         />
-        <text x="400" y="390" fill="#94a3b8" fontSize="14" textAnchor="middle">Time</text>
         <text x="20" y="200" fill="#94a3b8" fontSize="14" textAnchor="middle" transform="rotate(-90, 20, 200)">Price</text>
       </svg>
     </div>
