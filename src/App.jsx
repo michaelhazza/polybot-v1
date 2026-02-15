@@ -3,6 +3,7 @@ import BacktestConfigForm from './components/BacktestConfigForm';
 import BacktestRunsTable from './components/BacktestRunsTable';
 import RunDetail from './components/RunDetail';
 import RunComparison from './components/RunComparison';
+import DataDownload from './components/DataDownload';
 
 function App() {
   const [activeView, setActiveView] = useState('runs');
@@ -39,6 +40,21 @@ function App() {
           <p>Phase 1A - Backtest Management System</p>
         </div>
 
+        <div className="nav-tabs">
+          <button
+            className={`nav-tab ${activeView === 'runs' || activeView === 'detail' || activeView === 'comparison' ? 'active' : ''}`}
+            onClick={() => setActiveView('runs')}
+          >
+            Backtests
+          </button>
+          <button
+            className={`nav-tab ${activeView === 'data-download' ? 'active' : ''}`}
+            onClick={() => setActiveView('data-download')}
+          >
+            Data Download
+          </button>
+        </div>
+
         {activeView === 'runs' && (
           <>
             <BacktestConfigForm onBacktestCreated={handleBacktestCreated} />
@@ -56,6 +72,10 @@ function App() {
 
         {activeView === 'comparison' && selectedRunIds.length > 0 && (
           <RunComparison runIds={selectedRunIds} onBack={handleBackToRuns} />
+        )}
+
+        {activeView === 'data-download' && (
+          <DataDownload />
         )}
       </div>
     </div>
