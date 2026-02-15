@@ -219,25 +219,6 @@ router.get('/:id/export.csv', (req, res) => {
   }
 });
 
-router.delete('/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const transaction = db.transaction(() => {
-      db.prepare('DELETE FROM downloaded_snapshots WHERE download_id = ?').run(id);
-      db.prepare('DELETE FROM downloaded_markets WHERE download_id = ?').run(id);
-      db.prepare('DELETE FROM data_downloads WHERE id = ?').run(id);
-    });
-
-    transaction();
-
-    res.json({ success: true, message: 'Download deleted' });
-  } catch (error) {
-    console.error('Error deleting download:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 router.delete('/by-asset', (req, res) => {
   try {
     const { asset, period } = req.body;
@@ -277,6 +258,25 @@ router.delete('/by-asset', (req, res) => {
     res.json({ success: true, deleted: ids.length, message: `Cleared ${ids.length} download(s) for ${label}` });
   } catch (error) {
     console.error('Error clearing data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const transaction = db.transaction(() => {
+      db.prepare('DELETE FROM downloaded_snapshots WHERE download_id = ?').run(id);
+      db.prepare('DELETE FROM downloaded_markets WHERE download_id = ?').run(id);
+      db.prepare('DELETE FROM data_downloads WHERE id = ?').run(id);
+    });
+
+    transaction();
+
+    res.json({ success: true, message: 'Download deleted' });
+  } catch (error) {
+    console.error('Error deleting download:', error);
     res.status(500).json({ error: error.message });
   }
 });

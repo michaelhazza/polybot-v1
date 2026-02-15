@@ -13,6 +13,8 @@ function DataDownload() {
   const [data, setData] = useState(null);
   const [activeTab, setActiveTab] = useState('chart');
   const [stopping, setStopping] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearMessage, setClearMessage] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -35,6 +37,31 @@ function DataDownload() {
     }
   };
 
+  const handleClearData = async () => {
+    if (!confirm(`Clear all downloaded data for ${formData.asset} / ${formData.period}?`)) return;
+    setClearing(true);
+    setClearMessage(null);
+    setError(null);
+    try {
+      const response = await fetch('/api/data-downloads/by-asset', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset: formData.asset, period: formData.period })
+      });
+      if (!response.ok) throw new Error('Failed to clear data');
+      const result = await response.json();
+      setClearMessage(result.message);
+      setData(null);
+      setDownloadId(null);
+      setProgress(0);
+      setStage('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -42,6 +69,7 @@ function DataDownload() {
     setStage('Initializing...');
     setError(null);
     setData(null);
+    setClearMessage(null);
 
     try {
       const response = await fetch('/api/data-downloads', {
@@ -418,7 +446,7 @@ function DataDownload() {
             <button
               type="submit"
               className="btn"
-              disabled={loading}
+              disabled={loading || clearing}
             >
               {loading ? 'Downloading...' : 'Download Data'}
             </button>
@@ -433,7 +461,24 @@ function DataDownload() {
                 {stopping ? 'Stopping...' : 'Stop Download'}
               </button>
             )}
+            {!loading && (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleClearData}
+                disabled={clearing}
+                style={{ backgroundColor: '#64748b' }}
+              >
+                {clearing ? 'Clearing...' : 'Clear Data'}
+              </button>
+            )}
           </div>
+
+          {clearMessage && (
+            <div style={{ color: '#22c55e', marginTop: '0.75rem', fontSize: '0.9rem' }}>
+              {clearMessage}
+            </div>
+          )}
         </form>
 
         {(loading || (!loading && stage && stage.includes('Stopped'))) && (
