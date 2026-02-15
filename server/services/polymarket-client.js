@@ -125,6 +125,20 @@ class PolymarketClient {
     return Math.floor((endTime - startTime) / tickIntervalSeconds) + 1;
   }
 
+  async generateSyntheticData(asset, startTime, endTime, tickIntervalSeconds = 5) {
+    const market = this.getMarketInfo(asset, startTime, endTime);
+    const snapshots = [];
+
+    for (const tick of this.generateSyntheticTicks(asset, startTime, endTime, tickIntervalSeconds)) {
+      snapshots.push(tick);
+    }
+
+    return {
+      markets: [market],
+      snapshots
+    };
+  }
+
   *generateSyntheticTicks(asset, startTime, endTime, tickIntervalSeconds = 5, resumeFromTimestamp = null) {
     const seed = this._hashSeed(`${asset}_${startTime}_${endTime}`);
     const random = this._seededRandom(seed);
