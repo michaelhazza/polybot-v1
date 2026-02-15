@@ -95,7 +95,7 @@ class PolymarketClient {
           params: {
             market: tokenId,
             interval: 'max',
-            fidelity: 60
+            fidelity: 5
           }
         });
 

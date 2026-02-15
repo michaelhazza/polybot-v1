@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ConfirmDialog from './ConfirmDialog';
 
 function DataDownload() {
   const [formData, setFormData] = useState({
@@ -15,6 +16,9 @@ function DataDownload() {
   const [stopping, setStopping] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearMessage, setClearMessage] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState({ open: false });
+
+  const assetLabels = { BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana' };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -37,29 +41,39 @@ function DataDownload() {
     }
   };
 
-  const handleClearData = async () => {
-    if (!confirm(`Clear all downloaded data for ${formData.asset} / ${formData.period}?`)) return;
-    setClearing(true);
-    setClearMessage(null);
-    setError(null);
-    try {
-      const response = await fetch('/api/data-downloads/by-asset', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset: formData.asset, period: formData.period })
-      });
-      if (!response.ok) throw new Error('Failed to clear data');
-      const result = await response.json();
-      setClearMessage(result.message);
-      setData(null);
-      setDownloadId(null);
-      setProgress(0);
-      setStage('');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setClearing(false);
-    }
+  const handleClearData = () => {
+    const label = `${assetLabels[formData.asset]} (${formData.asset})`;
+    setConfirmDialog({
+      open: true,
+      title: 'Clear Downloaded Data',
+      message: `This will permanently remove all downloaded data for ${label}. You will need to re-download the data to use it again.`,
+      confirmLabel: 'Clear Data',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog({ open: false });
+        setClearing(true);
+        setClearMessage(null);
+        setError(null);
+        try {
+          const response = await fetch('/api/data-downloads/by-asset', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset: formData.asset })
+          });
+          if (!response.ok) throw new Error('Failed to clear data');
+          const result = await response.json();
+          setClearMessage(result.message);
+          setData(null);
+          setDownloadId(null);
+          setProgress(0);
+          setStage('');
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setClearing(false);
+        }
+      }
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -97,7 +111,6 @@ function DataDownload() {
     }
   };
 
-  // Poll for progress updates
   useEffect(() => {
     if (!downloadId) return;
 
@@ -164,8 +177,8 @@ function DataDownload() {
       return <div className="no-data">No data available to chart</div>;
     }
 
-    const upSnapshots = data.snapshots.filter(s => s.side === 'UP');
-    const downSnapshots = data.snapshots.filter(s => s.side === 'DOWN');
+    const yesSnapshots = data.snapshots.filter(s => s.side === 'YES' || s.side === 'UP');
+    const noSnapshots = data.snapshots.filter(s => s.side === 'NO' || s.side === 'DOWN');
 
     return (
       <div className="chart-container">
@@ -174,18 +187,18 @@ function DataDownload() {
           <div className="chart-legend">
             <span className="legend-item">
               <span className="legend-color" style={{ backgroundColor: '#3b82f6' }}></span>
-              UP Side (Yes)
+              YES Side
             </span>
             <span className="legend-item">
               <span className="legend-color" style={{ backgroundColor: '#ef4444' }}></span>
-              DOWN Side (No)
+              NO Side
             </span>
           </div>
         </div>
         <div className="chart-info">
           <div className="stat">
             <label>Total Data Points:</label>
-            <span>{data.snapshots.length}</span>
+            <span>{data.snapshots.length.toLocaleString()}</span>
           </div>
           <div className="stat">
             <label>Time Range:</label>
@@ -220,30 +233,34 @@ function DataDownload() {
               </g>
             ))}
           </g>
-          <g className="up-line">
-            <polyline
-              points={upSnapshots.map((s, i) => {
-                const x = 50 + (i / (upSnapshots.length - 1)) * 700;
-                const y = 350 - (s.mid * 300);
-                return `${x},${y}`;
-              }).join(' ')}
-              fill="none"
-              stroke="#3b82f6"
-              strokeWidth="2"
-            />
-          </g>
-          <g className="down-line">
-            <polyline
-              points={downSnapshots.map((s, i) => {
-                const x = 50 + (i / (downSnapshots.length - 1)) * 700;
-                const y = 350 - (s.mid * 300);
-                return `${x},${y}`;
-              }).join(' ')}
-              fill="none"
-              stroke="#ef4444"
-              strokeWidth="2"
-            />
-          </g>
+          {yesSnapshots.length > 0 && (
+            <g className="yes-line">
+              <polyline
+                points={yesSnapshots.map((s, i) => {
+                  const x = 50 + (i / (yesSnapshots.length - 1)) * 700;
+                  const y = 350 - (s.mid * 300);
+                  return `${x},${y}`;
+                }).join(' ')}
+                fill="none"
+                stroke="#3b82f6"
+                strokeWidth="2"
+              />
+            </g>
+          )}
+          {noSnapshots.length > 0 && (
+            <g className="no-line">
+              <polyline
+                points={noSnapshots.map((s, i) => {
+                  const x = 50 + (i / (noSnapshots.length - 1)) * 700;
+                  const y = 350 - (s.mid * 300);
+                  return `${x},${y}`;
+                }).join(' ')}
+                fill="none"
+                stroke="#ef4444"
+                strokeWidth="2"
+              />
+            </g>
+          )}
           <text x="400" y="390" fill="#94a3b8" fontSize="14" textAnchor="middle">
             Time
           </text>
@@ -261,29 +278,29 @@ function DataDownload() {
     }
 
     const combinedPrices = [];
-    const upMap = new Map();
-    const downMap = new Map();
+    const yesMap = new Map();
+    const noMap = new Map();
 
     data.snapshots.forEach(s => {
-      if (s.side === 'UP') {
-        upMap.set(s.timestamp, s.mid);
+      if (s.side === 'YES' || s.side === 'UP') {
+        yesMap.set(s.timestamp, s.mid);
       } else {
-        downMap.set(s.timestamp, s.mid);
+        noMap.set(s.timestamp, s.mid);
       }
     });
 
-    const timestamps = [...upMap.keys()].sort((a, b) => a - b);
+    const timestamps = [...yesMap.keys()].sort((a, b) => a - b);
     timestamps.forEach(ts => {
-      const up = upMap.get(ts) || 0.5;
-      const down = downMap.get(ts) || 0.5;
-      combinedPrices.push(up + down);
+      const yes = yesMap.get(ts) || 0.5;
+      const no = noMap.get(ts) || 0.5;
+      combinedPrices.push(yes + no);
     });
 
     return (
       <div className="waveform-container">
         <h3>Combined Price Waveform</h3>
         <p className="waveform-desc">
-          Visual representation of combined UP + DOWN prices over time.
+          Visual representation of combined YES + NO prices over time.
           Values below 1.00 indicate arbitrage opportunities.
         </p>
         <svg className="waveform" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid meet">
@@ -343,7 +360,7 @@ function DataDownload() {
     return (
       <div className="raw-data-container">
         <div className="raw-data-header">
-          <h3>Raw Data ({data.snapshots.length} records)</h3>
+          <h3>Raw Data ({data.snapshots.length.toLocaleString()} records)</h3>
           <button onClick={handleExportCSV} className="btn btn-sm">
             Download CSV
           </button>
@@ -364,7 +381,7 @@ function DataDownload() {
                 <tr key={i}>
                   <td>{new Date(snap.timestamp * 1000).toLocaleString()}</td>
                   <td>
-                    <span className={`badge ${snap.side === 'UP' ? 'badge-up' : 'badge-down'}`}>
+                    <span className={`badge ${snap.side === 'YES' || snap.side === 'UP' ? 'badge-up' : 'badge-down'}`}>
                       {snap.side}
                     </span>
                   </td>
@@ -383,7 +400,7 @@ function DataDownload() {
           </table>
           {data.snapshots.length > 100 && (
             <div className="table-footer">
-              Showing first 100 of {data.snapshots.length} records. Download CSV for full data.
+              Showing first 100 of {data.snapshots.length.toLocaleString()} records. Download CSV for full data.
             </div>
           )}
         </div>
@@ -393,10 +410,21 @@ function DataDownload() {
 
   return (
     <div className="data-download">
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm || (() => setConfirmDialog({ open: false }))}
+        onCancel={() => setConfirmDialog({ open: false })}
+      />
+
       <div className="card">
         <h2>Download Market Data</h2>
         <p style={{ color: '#94a3b8', marginBottom: '1.5rem' }}>
-          Download and analyze historical market data independently from backtesting
+          Download historical market data at 5-minute intervals. Use the Backtests tab to run analysis at your preferred timeframe.
         </p>
 
         <form onSubmit={handleSubmit}>
