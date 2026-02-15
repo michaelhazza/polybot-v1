@@ -26,12 +26,23 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - Target: autoscale
 
 ## Data Flow
-- Data Download: Fetches real markets from Polymarket Gamma API, then price history from CLOB API per market
-- Backtesting: Uses live API with automatic fallback to synthetic data if no markets found
+- Data Download: Fetches real markets from Polymarket Gamma API, then price history from CLOB API at 5-minute granularity
+- Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time to aggregate from granular data
+- Synthetic fallback: Automatically generates synthetic data when no live markets found for an asset
 - Stop/Resume: Downloads can be stopped mid-progress and resumed later
+- Clear Data: Users can clear downloaded data for specific asset/period combinations
 - Rate limiting: 100ms delays between API calls to avoid throttling
 
+## UI Components
+- ConfirmDialog: Reusable modal dialog for confirmations (replaces browser confirm())
+- DataDownload: Download and visualize market data with chart, waveform, and raw data views
+- BacktestConfigForm: Configure and run backtests with timeframe selection
+
 ## Recent Changes
+- Added reusable ConfirmDialog component for proper UI confirmations
+- Changed data fetching to 5-minute fidelity for granular price history
+- Added Clear Data button with confirmation dialog
+- Improved keyword matching with regex word boundaries and description search
 - Integrated live Polymarket API (Gamma + CLOB) for real market data
 - Added smart fallback to synthetic data when no live markets found
 - Fixed database CHECK constraint to include 'stopped' status
