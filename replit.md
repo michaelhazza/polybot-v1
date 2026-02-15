@@ -35,19 +35,19 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 
 ## UI Components
 - ConfirmDialog: Reusable modal dialog for confirmations (replaces browser confirm())
-- DataDownload: Download and visualize market data with chart, waveform, and raw data views
+- DataDownload: Download, persist, and inspect market data grouped by asset with expandable views
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- Redesigned DataDownload to show saved downloads grouped by asset (Bitcoin, etc.) with expandable inspection
+- Added GET /api/data-downloads endpoint listing all downloads with market/snapshot counts
+- Downloads persist in SQLite across app restarts; click any completed download to expand and inspect
+- Expanded view shows Arbitrage View, Price Chart, and Raw Data tabs with per-market analysis
+- Fixed timestamp alignment: rounds to 5-minute buckets for perfect YES/NO pairing
 - Added reusable ConfirmDialog component for proper UI confirmations
 - Changed data fetching to 5-minute fidelity for granular price history
-- Added Clear Data button with confirmation dialog
-- Improved keyword matching with regex word boundaries and description search
 - Integrated live Polymarket API (Gamma + CLOB) for real market data
 - Added smart fallback to synthetic data when no live markets found
-- Fixed database CHECK constraint to include 'stopped' status
 - Added stop/resume functionality for data downloads
 - Configured Vite for Replit (port 5000, host 0.0.0.0, allowedHosts)
-- Updated Express CORS to allow all origins for Replit proxy
-- Added static file serving to Express for production deployment
 - Database files excluded from git (too large for GitHub)
