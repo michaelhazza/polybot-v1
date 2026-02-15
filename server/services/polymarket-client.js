@@ -102,10 +102,12 @@ class PolymarketClient {
         const data = response.data?.history || [];
         console.log(`  Token ${side} (${tokenId.substring(0, 20)}...): ${data.length} price points`);
 
+        const BUCKET_SIZE = 300;
         for (const point of data) {
-          const timestamp = point.t;
+          const rawTimestamp = point.t;
+          const timestamp = Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
           const price = typeof point.p === 'string' ? parseFloat(point.p) : point.p;
-          if (timestamp && price !== undefined) {
+          if (rawTimestamp && price !== undefined) {
             allSnapshots.push({
               market_id: market.market_id,
               timestamp,
