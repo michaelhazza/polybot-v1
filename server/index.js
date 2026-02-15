@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import backtestsRouter from './routes/backtests.js';
 import authRouter from './routes/auth.js';
+import dataDownloadsRouter from './routes/data-downloads.js';
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/backtests', backtestsRouter);
+app.use('/api/data-downloads', dataDownloadsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

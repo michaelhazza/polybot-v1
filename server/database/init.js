@@ -113,6 +113,52 @@ CREATE TABLE IF NOT EXISTS jobs (
   stage TEXT,
   error_message TEXT
 );
+
+-- Data downloads (standalone data fetching)
+CREATE TABLE IF NOT EXISTS data_downloads (
+  id TEXT PRIMARY KEY,
+  asset TEXT NOT NULL,
+  period TEXT NOT NULL,
+  status TEXT NOT NULL,
+  progress_pct REAL DEFAULT 0,
+  stage TEXT DEFAULT 'queued',
+  start_time INTEGER NOT NULL,
+  end_time INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  error_message TEXT,
+
+  CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
+  CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m'))
+);
+
+-- Downloaded markets (per download session)
+CREATE TABLE IF NOT EXISTS downloaded_markets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  download_id TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  asset TEXT,
+  timeframe TEXT,
+  start_time INTEGER,
+  end_time INTEGER,
+  status TEXT,
+  fee_regime TEXT DEFAULT 'fee_free',
+  FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+);
+
+-- Downloaded snapshots (per download session)
+CREATE TABLE IF NOT EXISTS downloaded_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  download_id TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  timestamp INTEGER NOT NULL,
+  side TEXT NOT NULL,
+  mid REAL,
+  last REAL,
+  is_tradable INTEGER,
+  FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+);
 `);
 
 // Create indexes
@@ -123,6 +169,10 @@ CREATE INDEX IF NOT EXISTS idx_windows_run_minprice ON windows (run_id, min_comb
 CREATE INDEX IF NOT EXISTS idx_trades_by_run ON trades_sim (run_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_run ON jobs (run_id);
 CREATE INDEX IF NOT EXISTS idx_backtests_status ON backtests (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_downloads_status ON data_downloads (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_downloaded_markets_download ON downloaded_markets (download_id);
+CREATE INDEX IF NOT EXISTS idx_downloaded_snapshots_download ON downloaded_snapshots (download_id);
+CREATE INDEX IF NOT EXISTS idx_downloaded_snapshots_lookup ON downloaded_snapshots (download_id, timestamp);
 `);
 
 console.log('Database initialized successfully at:', dbPath);
