@@ -1,20 +1,24 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import backtestsRouter from './routes/backtests.js';
 import authRouter from './routes/auth.js';
 import dataDownloadsRouter from './routes/data-downloads.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // CORS Configuration
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : ['http://localhost:5173', 'http://localhost:3000'],
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
@@ -34,7 +38,20 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// 404 Handler - Must be after all routes
+// Serve static frontend in production
+const distPath = path.join(__dirname, '..', 'dist');
+const indexHtmlPath = path.join(distPath, 'index.html');
+if (fs.existsSync(indexHtmlPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(indexHtmlPath);
+  });
+}
+
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
