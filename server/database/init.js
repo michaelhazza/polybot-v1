@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS backtests (
   CONSTRAINT valid_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
   CONSTRAINT valid_status CHECK (status IN ('queued', 'running', 'completed', 'failed')),
   CONSTRAINT valid_timeframe CHECK (timeframe IN ('5min', '15min', '1hr')),
-  CONSTRAINT valid_period CHECK (period IN ('30d', '60d', '3m', '6m')),
+  CONSTRAINT valid_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m')),
   CONSTRAINT valid_analysis_period CHECK (analysis_end > analysis_start),
   CONSTRAINT valid_trade_size CHECK (trade_size > 0)
 );
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS data_downloads (
 
   CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
   CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
-  CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m'))
+  CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'))
 );
 
 -- Downloaded markets (per download session)
@@ -186,7 +186,7 @@ if (constraintCheck && constraintCheck.sql && !constraintCheck.sql.includes("'st
       error_message TEXT,
       CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
       CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
-      CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m'))
+      CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'))
     );
     CREATE TABLE downloaded_markets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,6 +213,77 @@ if (constraintCheck && constraintCheck.sql && !constraintCheck.sql.includes("'st
     );
   `);
   console.log('Migrated data_downloads tables to include stopped status');
+}
+
+// Migration: Add 12m, 24m, 36m period options
+const periodCheck = db.prepare(`
+  SELECT sql FROM sqlite_master WHERE type='table' AND name='data_downloads'
+`).get();
+if (periodCheck && periodCheck.sql && !periodCheck.sql.includes("'12m'")) {
+  const existingData = db.prepare('SELECT * FROM data_downloads').all();
+  const existingMarkets = db.prepare('SELECT * FROM downloaded_markets').all();
+  const existingSnapshots = db.prepare('SELECT * FROM downloaded_snapshots').all();
+
+  db.exec(`
+    DROP TABLE IF EXISTS downloaded_snapshots;
+    DROP TABLE IF EXISTS downloaded_markets;
+    DROP TABLE IF EXISTS data_downloads;
+  `);
+  db.exec(`
+    CREATE TABLE data_downloads (
+      id TEXT PRIMARY KEY,
+      asset TEXT NOT NULL,
+      period TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress_pct REAL DEFAULT 0,
+      stage TEXT DEFAULT 'queued',
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      error_message TEXT,
+      CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
+      CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
+      CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'))
+    );
+    CREATE TABLE downloaded_markets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      download_id TEXT NOT NULL,
+      market_id TEXT NOT NULL,
+      asset TEXT,
+      timeframe TEXT,
+      start_time INTEGER,
+      end_time INTEGER,
+      status TEXT,
+      fee_regime TEXT DEFAULT 'fee_free',
+      FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+    );
+    CREATE TABLE downloaded_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      download_id TEXT NOT NULL,
+      market_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      side TEXT NOT NULL,
+      mid REAL,
+      last REAL,
+      is_tradable INTEGER,
+      FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+    );
+  `);
+
+  const insertDl = db.prepare('INSERT INTO data_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+  for (const row of existingData) {
+    insertDl.run(row.id, row.asset, row.period, row.status, row.progress_pct, row.stage, row.start_time, row.end_time, row.created_at, row.completed_at, row.error_message);
+  }
+  const insertMkt = db.prepare('INSERT INTO downloaded_markets VALUES (?,?,?,?,?,?,?,?,?)');
+  for (const row of existingMarkets) {
+    insertMkt.run(row.id, row.download_id, row.market_id, row.asset, row.timeframe, row.start_time, row.end_time, row.status, row.fee_regime);
+  }
+  const insertSnap = db.prepare('INSERT INTO downloaded_snapshots VALUES (?,?,?,?,?,?,?,?)');
+  const insertMany = db.transaction((rows) => { for (const row of rows) insertSnap.run(row.id, row.download_id, row.market_id, row.timestamp, row.side, row.mid, row.last, row.is_tradable); });
+  insertMany(existingSnapshots);
+
+  console.log('Migrated data_downloads tables to include 12m/24m/36m periods (preserved existing data)');
 }
 
 // Create indexes
