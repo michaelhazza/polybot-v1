@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 const activeDownloads = new Set();
+const cancelledDownloads = new Set();
 
 function parsePeriod(period) {
   const map = {
@@ -26,8 +27,8 @@ router.post('/', async (req, res) => {
     }
 
     const existing = db.prepare(`
-      SELECT id, start_time, end_time FROM data_downloads
-      WHERE asset = ? AND period = ? AND status = 'running'
+      SELECT id, start_time, end_time, status FROM data_downloads
+      WHERE asset = ? AND period = ? AND status IN ('running', 'stopped')
       ORDER BY created_at DESC
       LIMIT 1
     `).get(asset, period);
@@ -43,6 +44,7 @@ router.post('/', async (req, res) => {
       }
 
       activeDownloads.add(existing.id);
+      db.prepare(`UPDATE data_downloads SET status = 'running' WHERE id = ?`).run(existing.id);
       processDataDownload(existing.id, asset, existing.start_time, existing.end_time).catch(err => {
         console.error(`Error resuming download ${existing.id}:`, err);
         db.prepare(`
@@ -236,6 +238,31 @@ router.delete('/:id', (req, res) => {
   }
 });
 
+router.post('/:id/stop', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const download = db.prepare(`
+      SELECT id, status FROM data_downloads WHERE id = ?
+    `).get(id);
+
+    if (!download) {
+      return res.status(404).json({ error: 'Download not found' });
+    }
+
+    if (download.status !== 'running') {
+      return res.status(400).json({ error: 'Download is not running' });
+    }
+
+    cancelledDownloads.add(id);
+
+    res.json({ success: true, message: 'Stop signal sent' });
+  } catch (error) {
+    console.error('Error stopping download:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 async function processDataDownload(downloadId, asset, startTime, endTime) {
   const updateProgress = (progress, stage) => {
     db.prepare(`
@@ -296,6 +323,18 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
       batch.push(tick);
 
       if (batch.length >= batchSize) {
+        if (cancelledDownloads.has(downloadId)) {
+          cancelledDownloads.delete(downloadId);
+          const totalSaved = savedAlready + insertedSinceResume;
+          const pct = Math.round((totalSaved / totalSnapshots) * 100);
+          updateProgress(pct, `Stopped at ${pct}% (${totalSaved.toLocaleString()} snapshots saved)`);
+          db.prepare(`
+            UPDATE data_downloads SET status = 'stopped' WHERE id = ?
+          `).run(downloadId);
+          console.log(`Download ${downloadId} stopped by user at ${pct}%`);
+          return;
+        }
+
         const currentBatch = batch;
         const transaction = db.transaction(() => {
           for (const snapshot of currentBatch) {

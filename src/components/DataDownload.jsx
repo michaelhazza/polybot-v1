@@ -12,16 +12,33 @@ function DataDownload() {
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [activeTab, setActiveTab] = useState('chart');
+  const [stopping, setStopping] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleStop = async () => {
+    if (!downloadId) return;
+    setStopping(true);
+    try {
+      const response = await fetch(`/api/data-downloads/${downloadId}/stop`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        throw new Error('Failed to stop download');
+      }
+    } catch (err) {
+      setError(err.message);
+      setStopping(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setProgress(0);
+    setStopping(false);
     setStage('Initializing...');
     setError(null);
     setData(null);
@@ -68,7 +85,7 @@ function DataDownload() {
         if (status.status === 'completed') {
           clearInterval(pollInterval);
           setLoading(false);
-          // Fetch the actual data
+          setStopping(false);
           const dataResponse = await fetch(`/api/data-downloads/${downloadId}/data`);
           if (dataResponse.ok) {
             const downloadedData = await dataResponse.json();
@@ -77,7 +94,13 @@ function DataDownload() {
         } else if (status.status === 'failed') {
           clearInterval(pollInterval);
           setLoading(false);
+          setStopping(false);
           setError(status.error_message || 'Download failed');
+        } else if (status.status === 'stopped') {
+          clearInterval(pollInterval);
+          setLoading(false);
+          setStopping(false);
+          setStage(`Stopped at ${(status.progress_pct || 0).toFixed(0)}% - click Download to resume`);
         }
       } catch (err) {
         console.error('Error polling status:', err);
@@ -391,17 +414,29 @@ function DataDownload() {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="btn"
-            disabled={loading}
-            style={{ marginTop: '1rem' }}
-          >
-            {loading ? 'Downloading...' : 'Download Data'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+            <button
+              type="submit"
+              className="btn"
+              disabled={loading}
+            >
+              {loading ? 'Downloading...' : 'Download Data'}
+            </button>
+            {loading && (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleStop}
+                disabled={stopping}
+                style={{ backgroundColor: '#ef4444' }}
+              >
+                {stopping ? 'Stopping...' : 'Stop Download'}
+              </button>
+            )}
+          </div>
         </form>
 
-        {loading && (
+        {(loading || (!loading && stage && stage.includes('Stopped'))) && (
           <div className="progress-section" style={{ marginTop: '1.5rem' }}>
             <div className="progress-info">
               <span className="progress-stage">{stage}</span>
