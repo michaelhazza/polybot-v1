@@ -2,6 +2,8 @@ import express from 'express';
 import db from '../database/db.js';
 import jobRunner from '../services/job-runner.js';
 import { v4 as uuidv4 } from 'uuid';
+import { requireAuth } from '../middleware/auth.js';
+import { validate, schemas } from '../middleware/validation.js';
 
 const router = express.Router();
 
@@ -20,15 +22,11 @@ function parsePeriod(period) {
 
 /**
  * POST /api/backtests - Create new backtest run
+ * Requires authentication
  */
-router.post('/', (req, res) => {
+router.post('/', requireAuth, validate(schemas.createBacktest), (req, res) => {
   try {
     const { asset, timeframe, period, tradeSize, name } = req.body;
-
-    // Validate inputs
-    if (!asset || !timeframe || !period || !tradeSize) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
 
     // Calculate analysis period
     const now = Math.floor(Date.now() / 1000);
@@ -111,7 +109,7 @@ router.get('/', (req, res) => {
 /**
  * GET /api/backtests/:id - Get backtest run details
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', validate(schemas.uuidParam, 'params'), (req, res) => {
   try {
     const { id } = req.params;
 
@@ -149,7 +147,7 @@ router.get('/:id', (req, res) => {
 /**
  * GET /api/backtests/:id/status - Get progress tracking
  */
-router.get('/:id/status', (req, res) => {
+router.get('/:id/status', validate(schemas.uuidParam, 'params'), (req, res) => {
   try {
     const { id } = req.params;
 
@@ -170,8 +168,9 @@ router.get('/:id/status', (req, res) => {
 
 /**
  * DELETE /api/backtests/:id - Delete backtest run
+ * Requires authentication
  */
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAuth, validate(schemas.uuidParam, 'params'), (req, res) => {
   try {
     const { id } = req.params;
 
@@ -194,8 +193,9 @@ router.delete('/:id', (req, res) => {
 
 /**
  * GET /api/backtests/:id/export/trades.csv - Export trades as CSV
+ * Requires authentication (sensitive data export)
  */
-router.get('/:id/export/trades.csv', (req, res) => {
+router.get('/:id/export/trades.csv', requireAuth, validate(schemas.uuidParam, 'params'), (req, res) => {
   try {
     const { id } = req.params;
 
@@ -246,10 +246,10 @@ router.get('/:id/export/trades.csv', (req, res) => {
 /**
  * GET /api/backtests/:id/debug/top-windows - Get top arbitrage windows
  */
-router.get('/:id/debug/top-windows', (req, res) => {
+router.get('/:id/debug/top-windows', validate(schemas.uuidParam, 'params'), validate(schemas.queryLimit, 'query'), (req, res) => {
   try {
     const { id } = req.params;
-    const limit = parseInt(req.query.limit) || 10;
+    const { limit = 10 } = req.query;
 
     const windows = db.prepare(`
       SELECT * FROM windows

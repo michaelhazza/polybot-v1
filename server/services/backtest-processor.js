@@ -25,86 +25,144 @@ class BacktestProcessor {
     const maxRuntimeMs = MAX_RUNTIME_MINUTES * 60 * 1000;
 
     try {
-      // Get run configuration
-      const run = db.prepare('SELECT * FROM backtests WHERE id = ?').get(runId);
-      if (!run) {
-        throw new Error(`Backtest run ${runId} not found`);
-      }
-
-      // Update status to running
+      const run = await this.getRunConfiguration(runId);
       this.updateProgress(runId, 0, 'running', 'Initializing');
 
-      // Step 1: Fetch or generate market data (10%)
-      this.updateProgress(runId, 10, 'running', 'Fetching markets');
-      const { markets, snapshots } = await this.fetchMarketData(run);
+      // Step 1: Fetch market data
+      const { markets, snapshots } = await this.fetchAndStoreMarketData(run, runId);
+      this.checkRuntimeLimit(startProcessingTime, maxRuntimeMs, 'market fetch');
 
-      if (Date.now() - startProcessingTime > maxRuntimeMs) {
-        throw new Error('Maximum runtime exceeded during market fetch');
-      }
+      // Step 2: Detect arbitrage windows
+      const detectionResult = await this.detectArbitrageWindows(snapshots, run, runId);
+      this.checkRuntimeLimit(startProcessingTime, maxRuntimeMs, 'window detection');
 
-      // Step 2: Store data in database (20%)
-      this.updateProgress(runId, 20, 'running', 'Storing market data');
-      this.storeMarketData(markets, snapshots);
-
-      // Step 3: Detect windows (50%)
-      this.updateProgress(runId, 50, 'running', 'Detecting windows');
-      const detectionResult = windowDetector.detectWindows(
-        snapshots,
-        run.analysis_start,
-        run.analysis_end
-      );
-
-      if (Date.now() - startProcessingTime > maxRuntimeMs) {
-        throw new Error('Maximum runtime exceeded during window detection');
-      }
-
-      // Step 4: Simulate trades (70%)
-      this.updateProgress(runId, 70, 'running', 'Simulating trades');
-      const simulationResult = tradeSimulator.simulateTrades(
-        detectionResult.windows,
-        run.trade_size
-      );
-
-      // Step 5: Store results (85%)
-      this.updateProgress(runId, 85, 'running', 'Storing results');
-      this.storeResults(runId, markets[0]?.market_id, detectionResult, simulationResult);
-
-      // Step 6: Calculate final metrics (95%)
-      this.updateProgress(runId, 95, 'running', 'Calculating metrics');
-      const finalMetrics = this.calculateFinalMetrics(
+      // Step 3: Simulate and store trades
+      const simulationResult = await this.simulateAndStoreTrades(
         detectionResult,
-        simulationResult,
-        run.analysis_start,
-        run.analysis_end
+        markets,
+        run,
+        runId
       );
 
-      // Step 7: Update backtest record with results (100%)
-      this.updateProgress(runId, 100, 'completed', 'Completed');
-      this.updateBacktestResults(runId, finalMetrics);
+      // Step 4: Finalize results
+      await this.finalizeBacktest(runId, detectionResult, simulationResult, run);
 
-      return { success: true, metrics: finalMetrics };
+      return { success: true, metrics: this.getMetricsFromResults(detectionResult, simulationResult) };
 
     } catch (error) {
-      console.error(`Error processing backtest ${runId}:`, error);
-
-      // Mark as failed
-      db.prepare(`
-        UPDATE backtests
-        SET status = 'failed',
-            error_message = ?,
-            completed_at = ?
-        WHERE id = ?
-      `).run(error.message, Math.floor(Date.now() / 1000), runId);
-
-      db.prepare(`
-        UPDATE jobs
-        SET status = 'failed',
-            error_message = ?
-        WHERE run_id = ?
-      `).run(error.message, runId);
-
+      this.handleProcessingError(runId, error);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Get run configuration from database
+   */
+  getRunConfiguration(runId) {
+    const run = db.prepare('SELECT * FROM backtests WHERE id = ?').get(runId);
+    if (!run) {
+      throw new Error(`Backtest run ${runId} not found`);
+    }
+    return run;
+  }
+
+  /**
+   * Check if runtime limit has been exceeded
+   */
+  checkRuntimeLimit(startTime, maxRuntimeMs, stage) {
+    if (Date.now() - startTime > maxRuntimeMs) {
+      throw new Error(`Maximum runtime exceeded during ${stage}`);
+    }
+  }
+
+  /**
+   * Fetch market data and store in database
+   */
+  async fetchAndStoreMarketData(run, runId) {
+    this.updateProgress(runId, 10, 'running', 'Fetching markets');
+    const { markets, snapshots } = await this.fetchMarketData(run);
+
+    this.updateProgress(runId, 20, 'running', 'Storing market data');
+    this.storeMarketData(markets, snapshots);
+
+    return { markets, snapshots };
+  }
+
+  /**
+   * Detect arbitrage windows from snapshots
+   */
+  async detectArbitrageWindows(snapshots, run, runId) {
+    this.updateProgress(runId, 50, 'running', 'Detecting windows');
+    return windowDetector.detectWindows(
+      snapshots,
+      run.analysis_start,
+      run.analysis_end
+    );
+  }
+
+  /**
+   * Simulate trades and store results
+   */
+  async simulateAndStoreTrades(detectionResult, markets, run, runId) {
+    this.updateProgress(runId, 70, 'running', 'Simulating trades');
+    const simulationResult = tradeSimulator.simulateTrades(
+      detectionResult.windows,
+      run.trade_size
+    );
+
+    this.updateProgress(runId, 85, 'running', 'Storing results');
+    this.storeResults(runId, markets[0]?.market_id, detectionResult, simulationResult);
+
+    return simulationResult;
+  }
+
+  /**
+   * Finalize backtest with metrics and completion status
+   */
+  async finalizeBacktest(runId, detectionResult, simulationResult, run) {
+    this.updateProgress(runId, 95, 'running', 'Calculating metrics');
+    const finalMetrics = this.calculateFinalMetrics(
+      detectionResult,
+      simulationResult,
+      run.analysis_start,
+      run.analysis_end
+    );
+
+    this.updateProgress(runId, 100, 'completed', 'Completed');
+    this.updateBacktestResults(runId, finalMetrics);
+  }
+
+  /**
+   * Extract metrics from results (helper for return value)
+   */
+  getMetricsFromResults(detectionResult, simulationResult) {
+    return {
+      windowsDetected: detectionResult.stats.windowsDetected,
+      tradesCompleted: simulationResult.metrics.tradesCompleted,
+      fillSuccessRate: simulationResult.metrics.fillSuccessRate
+    };
+  }
+
+  /**
+   * Handle processing errors and update database
+   */
+  handleProcessingError(runId, error) {
+    console.error(`Error processing backtest ${runId}:`, error);
+
+    db.prepare(`
+      UPDATE backtests
+      SET status = 'failed',
+          error_message = ?,
+          completed_at = ?
+      WHERE id = ?
+    `).run(error.message, Math.floor(Date.now() / 1000), runId);
+
+    db.prepare(`
+      UPDATE jobs
+      SET status = 'failed',
+          error_message = ?
+      WHERE run_id = ?
+    `).run(error.message, runId);
   }
 
   /**
