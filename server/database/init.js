@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS data_downloads (
   error_message TEXT,
 
   CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
-  CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
   CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m'))
 );
 
@@ -160,6 +160,60 @@ CREATE TABLE IF NOT EXISTS downloaded_snapshots (
   FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
 );
 `);
+
+// Migration: Fix CHECK constraint to include 'stopped' status
+const constraintCheck = db.prepare(`
+  SELECT sql FROM sqlite_master WHERE type='table' AND name='data_downloads'
+`).get();
+if (constraintCheck && constraintCheck.sql && !constraintCheck.sql.includes("'stopped'")) {
+  db.exec(`
+    DROP TABLE IF EXISTS downloaded_snapshots;
+    DROP TABLE IF EXISTS downloaded_markets;
+    DROP TABLE IF EXISTS data_downloads;
+  `);
+  db.exec(`
+    CREATE TABLE data_downloads (
+      id TEXT PRIMARY KEY,
+      asset TEXT NOT NULL,
+      period TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress_pct REAL DEFAULT 0,
+      stage TEXT DEFAULT 'queued',
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      error_message TEXT,
+      CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
+      CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
+      CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m'))
+    );
+    CREATE TABLE downloaded_markets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      download_id TEXT NOT NULL,
+      market_id TEXT NOT NULL,
+      asset TEXT,
+      timeframe TEXT,
+      start_time INTEGER,
+      end_time INTEGER,
+      status TEXT,
+      fee_regime TEXT DEFAULT 'fee_free',
+      FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+    );
+    CREATE TABLE downloaded_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      download_id TEXT NOT NULL,
+      market_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      side TEXT NOT NULL,
+      mid REAL,
+      last REAL,
+      is_tradable INTEGER,
+      FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+    );
+  `);
+  console.log('Migrated data_downloads tables to include stopped status');
+}
 
 // Create indexes
 db.exec(`
