@@ -13,19 +13,8 @@ class PolymarketClient {
     });
   }
 
-  /**
-   * Fetch markets by asset and timeframe
-   * @param {string} asset - BTC, ETH, or SOL
-   * @param {string} timeframe - 5min, 15min, 1hr
-   * @param {number} startTime - Unix timestamp in seconds
-   * @param {number} endTime - Unix timestamp in seconds
-   * @returns {Promise<Array>} List of markets
-   */
   async fetchMarkets(asset, timeframe, startTime, endTime) {
     try {
-      // Search for markets matching the criteria
-      // This is a simplified version - actual implementation would need to handle
-      // Polymarket's market structure and filtering
       const response = await this.client.get(`${GAMMA_API_BASE}/markets`, {
         params: {
           active: false,
@@ -34,18 +23,13 @@ class PolymarketClient {
         }
       });
 
-      // Filter markets by asset and timeframe criteria
       const markets = response.data || [];
       const filtered = markets.filter(market => {
         const question = market.question?.toLowerCase() || '';
         const assetMatch = question.includes(asset.toLowerCase());
-
-        // Check if market falls within our time range
         const marketStart = market.startDate ? new Date(market.startDate).getTime() / 1000 : 0;
         const marketEnd = market.endDate ? new Date(market.endDate).getTime() / 1000 : Date.now() / 1000;
-
         const timeMatch = marketEnd >= startTime && marketStart <= endTime;
-
         return assetMatch && timeMatch;
       });
 
@@ -64,17 +48,8 @@ class PolymarketClient {
     }
   }
 
-  /**
-   * Fetch price snapshots for a market (Tier B: mid/last prices)
-   * @param {string} marketId - Market condition ID
-   * @param {number} startTime - Unix timestamp in seconds
-   * @param {number} endTime - Unix timestamp in seconds
-   * @returns {Promise<Array>} List of price snapshots
-   */
   async fetchSnapshots(marketId, startTime, endTime) {
     try {
-      // Fetch orderbook snapshots or trades
-      // This is a placeholder - actual implementation depends on Polymarket's API
       const response = await this.client.get(`${POLYMARKET_API_BASE}/prices`, {
         params: {
           market: marketId,
@@ -86,11 +61,8 @@ class PolymarketClient {
       const snapshots = [];
       const data = response.data?.history || [];
 
-      // Process data into snapshots for UP and DOWN sides
       for (const point of data) {
         const timestamp = Math.floor(point.t || point.timestamp || Date.now() / 1000);
-
-        // UP side (YES outcome)
         if (point.p !== undefined || point.price !== undefined) {
           const mid = point.p || point.price;
           snapshots.push({
@@ -98,11 +70,9 @@ class PolymarketClient {
             timestamp,
             side: 'UP',
             mid,
-            last: mid, // Use mid as last for Tier B
+            last: mid,
             is_tradable: 1
           });
-
-          // DOWN side (NO outcome) - inverse price
           snapshots.push({
             market_id: marketId,
             timestamp,
@@ -121,17 +91,26 @@ class PolymarketClient {
     }
   }
 
-  /**
-   * Generate synthetic market data for testing
-   * This creates realistic price movements for development/testing
-   */
-  async generateSyntheticData(asset, startTime, endTime, tickIntervalSeconds = 5) {
-    const markets = [];
-    const snapshots = [];
+  _seededRandom(seed) {
+    let s = seed;
+    return () => {
+      s = (s * 1103515245 + 12345) & 0x7fffffff;
+      return s / 0x7fffffff;
+    };
+  }
 
-    // Create a synthetic market
+  _hashSeed(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash = hash & hash;
+    }
+    return Math.abs(hash) || 1;
+  }
+
+  getMarketInfo(asset, startTime, endTime) {
     const marketId = `synthetic_${asset}_${startTime}`;
-    markets.push({
+    return {
       market_id: marketId,
       asset,
       timeframe: '15min',
@@ -139,52 +118,58 @@ class PolymarketClient {
       end_time: endTime,
       status: 'closed',
       fee_regime: 'fee_free'
-    });
+    };
+  }
 
-    // Generate price data with occasional arbitrage windows
+  getTotalTickCount(startTime, endTime, tickIntervalSeconds = 5) {
+    return Math.floor((endTime - startTime) / tickIntervalSeconds) + 1;
+  }
+
+  *generateSyntheticTicks(asset, startTime, endTime, tickIntervalSeconds = 5, resumeFromTimestamp = null) {
+    const seed = this._hashSeed(`${asset}_${startTime}_${endTime}`);
+    const random = this._seededRandom(seed);
+    const marketId = `synthetic_${asset}_${startTime}`;
+
     let currentTime = startTime;
-    let basePrice = 0.5; // Start at 50/50
+    let basePrice = 0.5;
 
     while (currentTime <= endTime) {
-      // Random walk with mean reversion
       const drift = (0.5 - basePrice) * 0.01;
       const volatility = 0.002;
-      basePrice += drift + (Math.random() - 0.5) * volatility;
+      basePrice += drift + (random() - 0.5) * volatility;
       basePrice = Math.max(0.3, Math.min(0.7, basePrice));
 
-      // Occasionally create arbitrage windows (combined price < 1.00)
       let upMid = basePrice;
       let downMid = 1 - basePrice;
 
-      // 5% chance of creating an arbitrage window
-      if (Math.random() < 0.05) {
-        const discount = 0.003 + Math.random() * 0.007; // 0.3% to 1.0% discount
+      if (random() < 0.05) {
+        const discount = 0.003 + random() * 0.007;
         upMid = basePrice - discount / 2;
         downMid = (1 - basePrice) - discount / 2;
       }
 
-      snapshots.push({
-        market_id: marketId,
-        timestamp: currentTime,
-        side: 'UP',
-        mid: upMid,
-        last: upMid,
-        is_tradable: 1
-      });
+      if (resumeFromTimestamp === null || currentTime > resumeFromTimestamp) {
+        yield {
+          market_id: marketId,
+          timestamp: currentTime,
+          side: 'UP',
+          mid: upMid,
+          last: upMid,
+          is_tradable: 1
+        };
 
-      snapshots.push({
-        market_id: marketId,
-        timestamp: currentTime,
-        side: 'DOWN',
-        mid: downMid,
-        last: downMid,
-        is_tradable: 1
-      });
+        yield {
+          market_id: marketId,
+          timestamp: currentTime,
+          side: 'DOWN',
+          mid: downMid,
+          last: downMid,
+          is_tradable: 1
+        };
+      }
 
       currentTime += tickIntervalSeconds;
     }
-
-    return { markets, snapshots };
   }
 }
 

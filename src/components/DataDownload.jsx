@@ -42,6 +42,10 @@ function DataDownload() {
       const result = await response.json();
       setDownloadId(result.downloadId);
 
+      if (result.resumed) {
+        setStage('Resuming previous download...');
+      }
+
     } catch (err) {
       setError(err.message);
       setLoading(false);
