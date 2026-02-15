@@ -271,107 +271,95 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
   };
 
   try {
-    const lastSaved = db.prepare(`
-      SELECT MAX(timestamp) as last_ts FROM downloaded_snapshots WHERE download_id = ?
-    `).get(downloadId);
+    // Check if we should use live API or fall back to synthetic
+    const useLiveAPI = true; // Toggle to use live Polymarket API
 
-    const resumeFromTimestamp = lastSaved?.last_ts || null;
+    if (useLiveAPI) {
+      // Fetch real markets from Polymarket API
+      updateProgress(5, 'Fetching markets from Polymarket...');
+      const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime);
 
-    const hasMarkets = db.prepare(`
-      SELECT COUNT(*) as count FROM downloaded_markets WHERE download_id = ?
-    `).get(downloadId).count > 0;
+      if (markets.length === 0) {
+        console.warn(`No markets found for ${asset}, falling back to synthetic data`);
+        await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
+        return;
+      }
 
-    const market = polymarketClient.getMarketInfo(asset, startTime, endTime);
-    const totalTicks = polymarketClient.getTotalTickCount(startTime, endTime, 5);
-    const totalSnapshots = totalTicks * 2;
-
-    if (!hasMarkets) {
-      updateProgress(0, 'Saving market info...');
-      db.prepare(`
-        INSERT INTO downloaded_markets
+      // Save market metadata
+      updateProgress(10, 'Saving market metadata...');
+      const insertMarket = db.prepare(`
+        INSERT OR IGNORE INTO downloaded_markets
         (download_id, market_id, asset, timeframe, start_time, end_time, status, fee_regime)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        downloadId, market.market_id, market.asset, market.timeframe,
-        market.start_time, market.end_time, market.status, market.fee_regime
-      );
-    }
+      `);
 
-    let savedAlready = 0;
-    if (resumeFromTimestamp !== null) {
-      savedAlready = db.prepare(`
-        SELECT COUNT(*) as count FROM downloaded_snapshots WHERE download_id = ?
-      `).get(downloadId).count;
-      const pct = Math.round((savedAlready / totalSnapshots) * 100);
-      console.log(`Resuming download ${downloadId}: ${savedAlready} snapshots already saved (${pct}%), continuing from timestamp ${resumeFromTimestamp}`);
-      updateProgress(pct, `Resumed from ${pct}%...`);
-    }
+      for (const market of markets) {
+        insertMarket.run(
+          downloadId, market.market_id, market.asset, market.timeframe,
+          market.start_time, market.end_time, market.status, market.fee_regime
+        );
+      }
 
-    const insertSnapshot = db.prepare(`
-      INSERT INTO downloaded_snapshots
-      (download_id, market_id, timestamp, side, mid, last, is_tradable)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+      // Fetch snapshots for each market
+      const insertSnapshot = db.prepare(`
+        INSERT OR IGNORE INTO downloaded_snapshots
+        (download_id, market_id, timestamp, side, mid, last, is_tradable)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    const generator = polymarketClient.generateSyntheticTicks(asset, startTime, endTime, 5, resumeFromTimestamp);
+      let totalSnapshots = 0;
+      const progressPerMarket = 80 / markets.length;
 
-    let batch = [];
-    let insertedSinceResume = 0;
-    const batchSize = 1000;
+      for (let i = 0; i < markets.length; i++) {
+        const market = markets[i];
 
-    for (const tick of generator) {
-      batch.push(tick);
-
-      if (batch.length >= batchSize) {
+        // Check for cancellation
         if (cancelledDownloads.has(downloadId)) {
           cancelledDownloads.delete(downloadId);
-          const totalSaved = savedAlready + insertedSinceResume;
-          const pct = Math.round((totalSaved / totalSnapshots) * 100);
-          updateProgress(pct, `Stopped at ${pct}% (${totalSaved.toLocaleString()} snapshots saved)`);
-          db.prepare(`
-            UPDATE data_downloads SET status = 'stopped' WHERE id = ?
-          `).run(downloadId);
-          console.log(`Download ${downloadId} stopped by user at ${pct}%`);
+          updateProgress(10 + (i * progressPerMarket), `Stopped (${totalSnapshots.toLocaleString()} snapshots saved)`);
+          db.prepare(`UPDATE data_downloads SET status = 'stopped' WHERE id = ?`).run(downloadId);
+          console.log(`Download ${downloadId} stopped by user`);
           return;
         }
 
-        const currentBatch = batch;
-        const transaction = db.transaction(() => {
-          for (const snapshot of currentBatch) {
-            insertSnapshot.run(
-              downloadId, snapshot.market_id, snapshot.timestamp,
-              snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
-            );
-          }
-        });
-        transaction();
+        updateProgress(
+          10 + (i * progressPerMarket),
+          `Fetching data for market ${i + 1}/${markets.length}...`
+        );
 
-        insertedSinceResume += currentBatch.length;
-        const totalSaved = savedAlready + insertedSinceResume;
-        const pct = Math.round((totalSaved / totalSnapshots) * 100);
-        updateProgress(pct, `Saving snapshots (${totalSaved.toLocaleString()}/${totalSnapshots.toLocaleString()})...`);
+        const snapshots = await polymarketClient.fetchSnapshots(
+          market.market_id,
+          startTime,
+          endTime
+        );
 
-        batch = [];
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
-    }
-
-    if (batch.length > 0) {
-      const transaction = db.transaction(() => {
-        for (const snapshot of batch) {
-          insertSnapshot.run(
-            downloadId, snapshot.market_id, snapshot.timestamp,
-            snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
-          );
+        if (snapshots.length > 0) {
+          const transaction = db.transaction(() => {
+            for (const snapshot of snapshots) {
+              insertSnapshot.run(
+                downloadId, snapshot.market_id, snapshot.timestamp,
+                snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
+              );
+            }
+          });
+          transaction();
+          totalSnapshots += snapshots.length;
         }
-      });
-      transaction();
-    }
 
-    updateProgress(100, 'Completed');
-    db.prepare(`
-      UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
-    `).run('completed', Math.floor(Date.now() / 1000), downloadId);
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      updateProgress(95, 'Finalizing...');
+      updateProgress(100, `Completed (${totalSnapshots.toLocaleString()} snapshots saved)`);
+      db.prepare(`
+        UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
+      `).run('completed', Math.floor(Date.now() / 1000), downloadId);
+
+    } else {
+      // Fall back to synthetic data
+      await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
+    }
 
   } catch (error) {
     console.error('Error in processDataDownload:', error);
@@ -380,6 +368,116 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
     `).run('failed', error.message, downloadId);
     throw error;
   }
+}
+
+async function processDataDownloadSynthetic(downloadId, asset, startTime, endTime) {
+  const updateProgress = (progress, stage) => {
+    db.prepare(`
+      UPDATE data_downloads SET progress_pct = ?, stage = ? WHERE id = ?
+    `).run(progress, stage, downloadId);
+  };
+
+  const lastSaved = db.prepare(`
+    SELECT MAX(timestamp) as last_ts FROM downloaded_snapshots WHERE download_id = ?
+  `).get(downloadId);
+
+  const resumeFromTimestamp = lastSaved?.last_ts || null;
+
+  const hasMarkets = db.prepare(`
+    SELECT COUNT(*) as count FROM downloaded_markets WHERE download_id = ?
+  `).get(downloadId).count > 0;
+
+  const market = polymarketClient.getMarketInfo(asset, startTime, endTime);
+  const totalTicks = polymarketClient.getTotalTickCount(startTime, endTime, 5);
+  const totalSnapshots = totalTicks * 2;
+
+  if (!hasMarkets) {
+    updateProgress(0, 'Saving market info (synthetic)...');
+    db.prepare(`
+      INSERT INTO downloaded_markets
+      (download_id, market_id, asset, timeframe, start_time, end_time, status, fee_regime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      downloadId, market.market_id, market.asset, market.timeframe,
+      market.start_time, market.end_time, market.status, market.fee_regime
+    );
+  }
+
+  let savedAlready = 0;
+  if (resumeFromTimestamp !== null) {
+    savedAlready = db.prepare(`
+      SELECT COUNT(*) as count FROM downloaded_snapshots WHERE download_id = ?
+    `).get(downloadId).count;
+    const pct = Math.round((savedAlready / totalSnapshots) * 100);
+    console.log(`Resuming download ${downloadId}: ${savedAlready} snapshots already saved (${pct}%), continuing from timestamp ${resumeFromTimestamp}`);
+    updateProgress(pct, `Resumed from ${pct}%...`);
+  }
+
+  const insertSnapshot = db.prepare(`
+    INSERT INTO downloaded_snapshots
+    (download_id, market_id, timestamp, side, mid, last, is_tradable)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const generator = polymarketClient.generateSyntheticTicks(asset, startTime, endTime, 5, resumeFromTimestamp);
+
+  let batch = [];
+  let insertedSinceResume = 0;
+  const batchSize = 1000;
+
+  for (const tick of generator) {
+    batch.push(tick);
+
+    if (batch.length >= batchSize) {
+      if (cancelledDownloads.has(downloadId)) {
+        cancelledDownloads.delete(downloadId);
+        const totalSaved = savedAlready + insertedSinceResume;
+        const pct = Math.round((totalSaved / totalSnapshots) * 100);
+        updateProgress(pct, `Stopped at ${pct}% (${totalSaved.toLocaleString()} snapshots saved)`);
+        db.prepare(`
+          UPDATE data_downloads SET status = 'stopped' WHERE id = ?
+        `).run(downloadId);
+        console.log(`Download ${downloadId} stopped by user at ${pct}%`);
+        return;
+      }
+
+      const currentBatch = batch;
+      const transaction = db.transaction(() => {
+        for (const snapshot of currentBatch) {
+          insertSnapshot.run(
+            downloadId, snapshot.market_id, snapshot.timestamp,
+            snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
+          );
+        }
+      });
+      transaction();
+
+      insertedSinceResume += currentBatch.length;
+      const totalSaved = savedAlready + insertedSinceResume;
+      const pct = Math.round((totalSaved / totalSnapshots) * 100);
+      updateProgress(pct, `Saving snapshots (${totalSaved.toLocaleString()}/${totalSnapshots.toLocaleString()})...`);
+
+      batch = [];
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+
+  if (batch.length > 0) {
+    const transaction = db.transaction(() => {
+      for (const snapshot of batch) {
+        insertSnapshot.run(
+          downloadId, snapshot.market_id, snapshot.timestamp,
+          snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
+        );
+      }
+    });
+    transaction();
+  }
+
+  updateProgress(100, 'Completed (synthetic)');
+  db.prepare(`
+    UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
+  `).run('completed', Math.floor(Date.now() / 1000), downloadId);
 }
 
 export default router;
