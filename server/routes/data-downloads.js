@@ -308,8 +308,9 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
       });
       transaction();
 
-      const progress = 30 + ((i / snapshots.length) * 60);
-      updateProgress(progress, `Downloading snapshots (${i + batch.length}/${snapshots.length})...`);
+      const saved = Math.min(i + batch.length, snapshots.length);
+      const snapshotPct = Math.round((saved / snapshots.length) * 100);
+      updateProgress(snapshotPct, `Downloading snapshots (${saved.toLocaleString()}/${snapshots.length.toLocaleString()})...`);
 
       // Small delay to make progress visible
       await new Promise(resolve => setTimeout(resolve, 100));
