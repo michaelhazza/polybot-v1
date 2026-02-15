@@ -41,8 +41,8 @@ class PolymarketClient {
       console.log(`Fetched ${allMarkets.length} total markets from Gamma API`);
 
       const filtered = allMarkets.filter(market => {
-        const question = market.question || '';
-        const assetMatch = keywords.some(kw => kw.test(question));
+        const searchText = `${market.question || ''} ${market.description || ''}`;
+        const assetMatch = keywords.some(kw => kw.test(searchText));
         if (!assetMatch) return false;
 
         const hasClobTokens = market.clobTokenIds && market.clobTokenIds !== '[]';
