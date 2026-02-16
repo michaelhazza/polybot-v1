@@ -47,10 +47,23 @@ function DataDownload() {
 
   useEffect(() => {
     if (!activeDownloadId) return;
+    let errorCount = 0;
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`/api/data-downloads/${activeDownloadId}/status`);
-        if (!res.ok) throw new Error('Failed to fetch status');
+        if (!res.ok) {
+          errorCount++;
+          if (res.status === 404 || errorCount >= 10) {
+            clearInterval(pollInterval);
+            setLoading(false);
+            setStopping(false);
+            setActiveDownloadId(null);
+            fetchDownloads();
+            return;
+          }
+          throw new Error('Failed to fetch status');
+        }
+        errorCount = 0;
         const status = await res.json();
         setProgress(status.progress_pct || 0);
         setStage(status.stage || '');
@@ -150,10 +163,18 @@ function DataDownload() {
     if (!activeDownloadId) return;
     setStopping(true);
     try {
-      await fetch(`/api/data-downloads/${activeDownloadId}/stop`, { method: 'POST' });
+      const res = await fetch(`/api/data-downloads/${activeDownloadId}/stop`, { method: 'POST' });
+      if (!res.ok) {
+        setLoading(false);
+        setStopping(false);
+        setActiveDownloadId(null);
+        fetchDownloads();
+      }
     } catch (err) {
-      setError(err.message);
+      setLoading(false);
       setStopping(false);
+      setActiveDownloadId(null);
+      fetchDownloads();
     }
   };
 

@@ -7,6 +7,18 @@ const router = express.Router();
 const activeDownloads = new Set();
 const cancelledDownloads = new Set();
 
+try {
+  const orphaned = db.prepare(`
+    UPDATE data_downloads SET status = 'stopped', stage = 'Stopped (server restarted)'
+    WHERE status = 'running'
+  `).run();
+  if (orphaned.changes > 0) {
+    console.log(`[DataDownloads] Cleaned up ${orphaned.changes} orphaned running download(s) from previous session`);
+  }
+} catch (e) {
+  // table may not exist yet on first run
+}
+
 function parsePeriod(period) {
   const map = {
     '7d': 7,
