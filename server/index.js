@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import backtestsRouter from './routes/backtests.js';
 import authRouter from './routes/auth.js';
 import dataDownloadsRouter from './routes/data-downloads.js';
+import settingsRouter from './routes/settings.js';
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ app.use(express.json());
 app.use('/api/auth', authRouter);
 app.use('/api/backtests', backtestsRouter);
 app.use('/api/data-downloads', dataDownloadsRouter);
+app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

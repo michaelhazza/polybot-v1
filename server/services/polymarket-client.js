@@ -1,4 +1,6 @@
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import bitqueryClient from '../../lib/bitquery-client.js';
 import { discoverMarketsByAsset, batchDiscoverMarkets } from '../../lib/polymarket-market-finder.js';
 import { createTokenMapping } from '../../lib/data-mappers.js';
@@ -192,7 +194,8 @@ class PolymarketClient {
         return [];
       }
 
-      const BUCKET_SIZE = 300;
+      const BUCKET_SIZE = this._getSnapshotIntervalSeconds();
+      const isTradeLevel = BUCKET_SIZE === 0;
       const snapshots = [];
 
       const clobTokenIds = market.clob_token_ids || [];
@@ -204,7 +207,9 @@ class PolymarketClient {
         if (!blockTime) continue;
 
         const rawTimestamp = Math.floor(new Date(blockTime).getTime() / 1000);
-        const timestamp = Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
+        const timestamp = isTradeLevel
+          ? rawTimestamp
+          : Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
 
         const price = parseFloat(trade.Trade?.PriceInUSD) || 0;
         const tradeIds = trade.Trade?.Ids || [];
@@ -241,6 +246,12 @@ class PolymarketClient {
         }
       }
 
+      if (isTradeLevel) {
+        snapshots.sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`[PolymarketClient] Transformed to ${snapshots.length} snapshots (trade level)`);
+        return snapshots;
+      }
+
       const buckets = new Map();
       for (const snap of snapshots) {
         const key = `${snap.timestamp}_${snap.side}`;
@@ -262,7 +273,7 @@ class PolymarketClient {
 
       aggregated.sort((a, b) => a.timestamp - b.timestamp);
 
-      console.log(`[PolymarketClient] Transformed to ${aggregated.length} snapshots`);
+      console.log(`[PolymarketClient] Transformed to ${aggregated.length} snapshots (${BUCKET_SIZE}s buckets)`);
 
       return aggregated;
     } catch (error) {
@@ -296,10 +307,11 @@ class PolymarketClient {
         const data = response.data?.history || [];
         console.log(`  Token ${side} (${tokenId.substring(0, 20)}...): ${data.length} price points`);
 
-        const BUCKET_SIZE = 300;
+        const BUCKET_SIZE = this._getSnapshotIntervalSeconds();
+        const isTradeLevel = BUCKET_SIZE === 0;
         for (const point of data) {
           const rawTimestamp = point.t;
-          const timestamp = Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
+          const timestamp = isTradeLevel ? rawTimestamp : Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
           const price = typeof point.p === 'string' ? parseFloat(point.p) : point.p;
           if (rawTimestamp && price !== undefined) {
             allSnapshots.push({
@@ -321,6 +333,20 @@ class PolymarketClient {
       console.error(`Error fetching snapshots for ${market.market_id}:`, error.message);
       return [];
     }
+  }
+
+  _getSnapshotIntervalSeconds() {
+    try {
+      const settingsPath = path.join(process.cwd(), 'data', 'settings.json');
+      if (fs.existsSync(settingsPath)) {
+        const raw = fs.readFileSync(settingsPath, 'utf-8');
+        const settings = JSON.parse(raw);
+        const minutes = settings.snapshotInterval;
+        if (minutes === 0) return 0;
+        return (minutes || 1) * 60;
+      }
+    } catch (e) {}
+    return 60;
   }
 
   _seededRandom(seed) {

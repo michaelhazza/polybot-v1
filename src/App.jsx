@@ -4,6 +4,7 @@ import BacktestRunsTable from './components/BacktestRunsTable';
 import RunDetail from './components/RunDetail';
 import RunComparison from './components/RunComparison';
 import DataDownload from './components/DataDownload';
+import Settings from './components/Settings';
 
 function App() {
   const [activeView, setActiveView] = useState('runs');
@@ -53,6 +54,12 @@ function App() {
           >
             Data Download
           </button>
+          <button
+            className={`nav-tab ${activeView === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveView('settings')}
+          >
+            Settings
+          </button>
         </div>
 
         {activeView === 'runs' && (
@@ -76,6 +83,10 @@ function App() {
 
         {activeView === 'data-download' && (
           <DataDownload />
+        )}
+
+        {activeView === 'settings' && (
+          <Settings />
         )}
       </div>
     </div>
