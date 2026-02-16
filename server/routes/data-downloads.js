@@ -617,7 +617,7 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         console.log(`[DataDownload] Found existing data for ${existingCoverage.size} markets`);
       }
 
-      updateProgress(-1, 'Pulling Polymarket data...');
+      updateProgress(-1, 'Discovering markets on Polymarket...');
       const excludeMarketIds = new Set(existingCoverage.keys());
       const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime, { excludeMarketIds });
 
@@ -646,7 +646,7 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
 
       console.log(`[DataDownload] ${marketsAlreadyCovered.length} markets already covered, ${marketsToFetch.length} need Bitquery fetch`);
 
-      updateProgress(-1, `Found ${markets.length} market(s) (${marketsAlreadyCovered.length} cached, ${marketsToFetch.length} new)...`);
+      updateProgress(5, `Found ${markets.length} market(s). Pulling data from ${marketsToFetch.length} market(s)${marketsAlreadyCovered.length > 0 ? ` (${marketsAlreadyCovered.length} cached)` : ''}...`);
 
       const insertMarket = db.prepare(`
         INSERT OR IGNORE INTO downloaded_markets
