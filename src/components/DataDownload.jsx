@@ -688,7 +688,16 @@ function ExpandedDataView({ data, dl, activeTab, selectedMarket, onSetTab, onSet
     return { marketIds, marketMap };
   }, [data]);
 
-  if (!marketData) return <div className="no-data">No data available</div>;
+  if (!marketData) return (
+    <div className="no-data" style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8' }}>
+      <div style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>No price snapshots available</div>
+      {data && data.markets && data.markets.length > 0 && (
+        <div style={{ fontSize: '0.85rem', color: '#64748b' }}>
+          {data.markets.length} market{data.markets.length !== 1 ? 's' : ''} found, but no trade data was returned from the blockchain for this period.
+        </div>
+      )}
+    </div>
+  );
 
   const getFilteredPaired = () => {
     if (selectedMarket === 'all') return Object.values(marketData.marketMap).flatMap(m => m.paired).sort((a, b) => a.timestamp - b.timestamp);
