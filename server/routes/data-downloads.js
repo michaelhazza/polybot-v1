@@ -340,6 +340,82 @@ router.post('/:id/stop', (req, res) => {
   }
 });
 
+function getExistingCoverage(asset, startTime, endTime) {
+  const existingDownloads = db.prepare(`
+    SELECT id FROM data_downloads
+    WHERE asset = ? AND status = 'completed'
+  `).all(asset);
+
+  if (existingDownloads.length === 0) return new Map();
+
+  const ids = existingDownloads.map(d => d.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const rows = db.prepare(`
+    SELECT market_id, MIN(timestamp) as min_ts, MAX(timestamp) as max_ts, COUNT(*) as cnt
+    FROM downloaded_snapshots
+    WHERE download_id IN (${placeholders})
+      AND timestamp >= ? AND timestamp <= ?
+    GROUP BY market_id
+  `).all(...ids, startTime, endTime);
+
+  const coverage = new Map();
+  for (const row of rows) {
+    coverage.set(row.market_id, {
+      minTs: row.min_ts,
+      maxTs: row.max_ts,
+      count: row.cnt,
+    });
+  }
+  return coverage;
+}
+
+function copyExistingSnapshots(downloadId, asset, marketId, startTime, endTime) {
+  const existingDownloads = db.prepare(`
+    SELECT id FROM data_downloads
+    WHERE asset = ? AND status = 'completed'
+  `).all(asset);
+
+  if (existingDownloads.length === 0) return 0;
+
+  const ids = existingDownloads.map(d => d.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const snapshots = db.prepare(`
+    SELECT market_id, timestamp, side, mid, last, is_tradable
+    FROM downloaded_snapshots
+    WHERE download_id IN (${placeholders}) AND market_id = ?
+      AND timestamp >= ? AND timestamp <= ?
+    ORDER BY timestamp ASC
+  `).all(...ids, marketId, startTime, endTime);
+
+  const seen = new Set();
+  const unique = [];
+  for (const s of snapshots) {
+    const key = `${s.timestamp}_${s.side}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(s);
+    }
+  }
+
+  if (unique.length === 0) return 0;
+
+  const insert = db.prepare(`
+    INSERT INTO downloaded_snapshots (download_id, market_id, timestamp, side, mid, last, is_tradable)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const tx = db.transaction(() => {
+    for (const s of unique) {
+      insert.run(downloadId, s.market_id, s.timestamp, s.side, s.mid, s.last, s.is_tradable);
+    }
+  });
+  tx();
+
+  return unique.length;
+}
+
 async function processDataDownload(downloadId, asset, startTime, endTime) {
   const updateProgress = (progress, stage) => {
     db.prepare(`
@@ -348,12 +424,19 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
   };
 
   try {
-    // Check if we should use live API or fall back to synthetic
-    const useLiveAPI = true; // Toggle to use live Polymarket API
+    const useLiveAPI = true;
 
     if (useLiveAPI) {
+      updateProgress(-1, 'Checking existing data coverage...');
+      const existingCoverage = getExistingCoverage(asset, startTime, endTime);
+
+      if (existingCoverage.size > 0) {
+        console.log(`[DataDownload] Found existing data for ${existingCoverage.size} markets`);
+      }
+
       updateProgress(-1, 'Pulling Polymarket data...');
-      const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime);
+      const excludeMarketIds = new Set(existingCoverage.keys());
+      const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime, { excludeMarketIds });
 
       if (markets.length === 0) {
         console.warn(`[DataDownload] No markets found for ${asset}`);
@@ -365,7 +448,22 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         return;
       }
 
-      updateProgress(-1, `Found ${markets.length} market(s), processing...`);
+      const marketsToFetch = [];
+      const marketsAlreadyCovered = [];
+
+      for (const market of markets) {
+        const cov = existingCoverage.get(market.market_id);
+        if (cov && cov.minTs <= startTime + 86400 && cov.maxTs >= endTime - 86400 && cov.count > 10) {
+          marketsAlreadyCovered.push(market);
+        } else {
+          marketsToFetch.push(market);
+        }
+      }
+
+      console.log(`[DataDownload] ${marketsAlreadyCovered.length} markets already covered, ${marketsToFetch.length} need Bitquery fetch`);
+
+      updateProgress(-1, `Found ${markets.length} market(s) (${marketsAlreadyCovered.length} cached, ${marketsToFetch.length} new)...`);
+
       const insertMarket = db.prepare(`
         INSERT OR IGNORE INTO downloaded_markets
         (download_id, market_id, asset, timeframe, start_time, end_time, status, fee_regime)
@@ -389,23 +487,45 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         throw new Error(`Failed to save market metadata: ${error.message}`);
       }
 
-      // Fetch snapshots for each market
       const insertSnapshot = db.prepare(`
-        INSERT OR IGNORE INTO downloaded_snapshots
+        INSERT INTO downloaded_snapshots
         (download_id, market_id, timestamp, side, mid, last, is_tradable)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       let totalSnapshots = 0;
-      const progressPerMarket = 80 / markets.length;
+      let skippedMarkets = 0;
+      const totalMarkets = markets.length;
 
-      for (let i = 0; i < markets.length; i++) {
-        const market = markets[i];
+      for (let i = 0; i < marketsAlreadyCovered.length; i++) {
+        const market = marketsAlreadyCovered[i];
 
-        // Check for cancellation
         if (cancelledDownloads.has(downloadId)) {
           cancelledDownloads.delete(downloadId);
-          updateProgress(10 + (i * progressPerMarket), `Stopped (${totalSnapshots.toLocaleString()} snapshots saved)`);
+          db.prepare(`UPDATE data_downloads SET status = 'stopped' WHERE id = ?`).run(downloadId);
+          return;
+        }
+
+        const marketLabel = market.question ? market.question.substring(0, 50) : market.market_id;
+        updateProgress(-1, `Copying cached data for market ${i + 1}/${marketsAlreadyCovered.length}: ${marketLabel}...`);
+
+        try {
+          const copied = copyExistingSnapshots(downloadId, asset, market.market_id, startTime, endTime);
+          totalSnapshots += copied;
+          skippedMarkets++;
+          console.log(`[DataDownload] Copied ${copied} existing snapshots for ${market.market_id} (skipped Bitquery)`);
+        } catch (error) {
+          console.error(`[DataDownload] Error copying snapshots for ${market.market_id}:`, error.message);
+          marketsToFetch.push(market);
+        }
+      }
+
+      for (let i = 0; i < marketsToFetch.length; i++) {
+        const market = marketsToFetch[i];
+
+        if (cancelledDownloads.has(downloadId)) {
+          cancelledDownloads.delete(downloadId);
+          updateProgress(0, `Stopped (${totalSnapshots.toLocaleString()} snapshots saved)`);
           db.prepare(`UPDATE data_downloads SET status = 'stopped' WHERE id = ?`).run(downloadId);
           console.log(`Download ${downloadId} stopped by user`);
           return;
@@ -414,7 +534,7 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         const marketLabel = market.question ? market.question.substring(0, 50) : market.market_id;
         updateProgress(
           -1,
-          `Pulling data for market ${i + 1}/${markets.length}: ${marketLabel}...`
+          `Pulling data for market ${i + 1}/${marketsToFetch.length}: ${marketLabel}...`
         );
 
         const snapshots = await polymarketClient.fetchSnapshots(
@@ -424,20 +544,10 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         );
 
         if (snapshots.length > 0) {
-          // Validate snapshots before insertion
           const validSnapshots = snapshots.filter(s => {
-            if (!s.market_id || !s.timestamp || !s.side) {
-              console.warn('[DataDownload] Invalid snapshot: missing required fields');
-              return false;
-            }
-            if (typeof s.mid !== 'number' || typeof s.last !== 'number') {
-              console.warn('[DataDownload] Invalid snapshot: prices must be numbers');
-              return false;
-            }
-            if (s.mid < 0 || s.mid > 1 || s.last < 0 || s.last > 1) {
-              console.warn('[DataDownload] Invalid snapshot: prices out of range [0,1]');
-              return false;
-            }
+            if (!s.market_id || !s.timestamp || !s.side) return false;
+            if (typeof s.mid !== 'number' || typeof s.last !== 'number') return false;
+            if (s.mid < 0 || s.mid > 1 || s.last < 0 || s.last > 1) return false;
             return true;
           });
 
@@ -455,7 +565,6 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
               totalSnapshots += validSnapshots.length;
             } catch (error) {
               console.error(`[DataDownload] Error inserting snapshots for market ${market.market_id}:`, error.message);
-              // Continue with next market instead of failing entirely
             }
           }
 
@@ -464,12 +573,13 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
           }
         }
 
-        // Small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
+      const fetchedCount = marketsToFetch.length;
+      const cachedCount = skippedMarkets;
       updateProgress(95, 'Finalizing...');
-      updateProgress(100, `Completed (${totalSnapshots.toLocaleString()} snapshots saved)`);
+      updateProgress(100, `Completed (${totalSnapshots.toLocaleString()} snapshots, ${cachedCount} cached, ${fetchedCount} fetched)`);
       db.prepare(`
         UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
       `).run('completed', Math.floor(Date.now() / 1000), downloadId);

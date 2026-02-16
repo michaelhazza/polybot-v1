@@ -26,31 +26,29 @@ class PolymarketClient {
     console.log(`[PolymarketClient] Data source: ${this.useBitquery ? 'Bitquery (blockchain)' : 'Polymarket API'}`);
   }
 
-  async fetchMarkets(asset, timeframe, startTime, endTime) {
-    // Use Bitquery if enabled, otherwise fall back to Polymarket API
+  async fetchMarkets(asset, timeframe, startTime, endTime, options = {}) {
     if (this.useBitquery) {
-      return this._fetchMarketsBitquery(asset, timeframe, startTime, endTime);
+      return this._fetchMarketsBitquery(asset, timeframe, startTime, endTime, options);
     } else {
       return this._fetchMarketsPolymarketAPI(asset, timeframe, startTime, endTime);
     }
   }
 
-  async _fetchMarketsBitquery(asset, timeframe, startTime, endTime) {
+  async _fetchMarketsBitquery(asset, timeframe, startTime, endTime, options = {}) {
     try {
       console.log(`[PolymarketClient] Fetching ${asset} markets via Bitquery...`);
 
       const startDate = new Date(startTime * 1000);
       const endDate = new Date(endTime * 1000);
 
-      // Use batch discovery for large time ranges (> 7 days)
       const daysDiff = (endDate - startDate) / (1000 * 60 * 60 * 24);
       let markets;
 
       if (daysDiff > 7) {
         console.log(`[PolymarketClient] Large time range (${daysDiff.toFixed(1)} days), using batch discovery`);
-        markets = await batchDiscoverMarkets(asset, timeframe, startDate, endDate, 7);
+        markets = await batchDiscoverMarkets(asset, timeframe, startDate, endDate, 7, options);
       } else {
-        markets = await discoverMarketsByAsset(asset, timeframe, startDate, endDate);
+        markets = await discoverMarketsByAsset(asset, timeframe, startDate, endDate, options);
       }
 
       console.log(`[PolymarketClient] Found ${markets.length} markets via Bitquery`);

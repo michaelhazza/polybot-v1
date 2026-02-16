@@ -36,6 +36,7 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - **Trade Data**: Bitquery DEXTradeByTokens fetches historical trades from Polygon blockchain
 - **Token Mapping**: On-chain tokens lack human-readable names; Gamma API provides the mapping between token IDs and market questions
 - **Snapshot Processing**: Trades bucketed into 5-minute intervals, YES/NO sides determined by token ID matching
+- **Deduplication**: Before Bitquery API calls, checks existing DB coverage per market; skips API for markets already downloaded, copies cached data instead
 - Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time
 - Synthetic fallback: Automatically generates synthetic data when no live markets found
 - Stop/Resume: Downloads can be stopped mid-progress and resumed later
