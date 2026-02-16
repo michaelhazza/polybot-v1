@@ -41,31 +41,55 @@ router.get('/', (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { asset, period } = req.body;
+    const { asset, period, customStart, customEnd } = req.body;
 
-    // Validate required fields
     if (!asset || !period) {
       return res.status(400).json({ error: 'Missing required fields: asset, period' });
     }
 
-    // Validate asset
     const validAssets = ['BTC', 'ETH', 'SOL'];
     if (!validAssets.includes(asset)) {
       return res.status(400).json({ error: `Invalid asset. Must be one of: ${validAssets.join(', ')}` });
     }
 
-    // Validate period
-    const validPeriods = ['7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'];
+    const validPeriods = ['7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m', 'custom'];
     if (!validPeriods.includes(period)) {
       return res.status(400).json({ error: `Invalid period. Must be one of: ${validPeriods.join(', ')}` });
     }
 
-    const existing = db.prepare(`
-      SELECT id, start_time, end_time, status FROM data_downloads
-      WHERE asset = ? AND period = ? AND status IN ('running', 'stopped')
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(asset, period);
+    if (period === 'custom') {
+      if (!customStart || !customEnd) {
+        return res.status(400).json({ error: 'Custom period requires customStart and customEnd timestamps' });
+      }
+      if (typeof customStart !== 'number' || typeof customEnd !== 'number') {
+        return res.status(400).json({ error: 'customStart and customEnd must be unix timestamps (numbers)' });
+      }
+      if (customEnd <= customStart) {
+        return res.status(400).json({ error: 'customEnd must be after customStart' });
+      }
+      const maxRange = 1095 * 24 * 60 * 60;
+      if (customEnd - customStart > maxRange) {
+        return res.status(400).json({ error: 'Custom range cannot exceed 3 years' });
+      }
+    }
+
+    let existing;
+    if (period === 'custom') {
+      existing = db.prepare(`
+        SELECT id, start_time, end_time, status FROM data_downloads
+        WHERE asset = ? AND period = 'custom' AND status IN ('running', 'stopped')
+          AND start_time = ? AND end_time = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(asset, customStart, customEnd);
+    } else {
+      existing = db.prepare(`
+        SELECT id, start_time, end_time, status FROM data_downloads
+        WHERE asset = ? AND period = ? AND status IN ('running', 'stopped')
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(asset, period);
+    }
 
     if (existing) {
       if (activeDownloads.has(existing.id)) {
@@ -98,9 +122,15 @@ router.post('/', async (req, res) => {
 
     const downloadId = uuidv4();
     const now = Math.floor(Date.now() / 1000);
-    const periodDays = parsePeriod(period);
-    const startTime = now - (periodDays * 24 * 60 * 60);
-    const endTime = now;
+    let startTime, endTime;
+    if (period === 'custom') {
+      startTime = customStart;
+      endTime = customEnd;
+    } else {
+      const periodDays = parsePeriod(period);
+      startTime = now - (periodDays * 24 * 60 * 60);
+      endTime = now;
+    }
 
     db.prepare(`
       INSERT INTO data_downloads
@@ -402,7 +432,7 @@ function copyExistingSnapshots(downloadId, asset, marketId, startTime, endTime) 
   if (unique.length === 0) return 0;
 
   const insert = db.prepare(`
-    INSERT INTO downloaded_snapshots (download_id, market_id, timestamp, side, mid, last, is_tradable)
+    INSERT OR IGNORE INTO downloaded_snapshots (download_id, market_id, timestamp, side, mid, last, is_tradable)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -488,7 +518,7 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
       }
 
       const insertSnapshot = db.prepare(`
-        INSERT INTO downloaded_snapshots
+        INSERT OR IGNORE INTO downloaded_snapshots
         (download_id, market_id, timestamp, side, mid, last, is_tradable)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);

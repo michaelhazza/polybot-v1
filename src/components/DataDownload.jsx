@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import ConfirmDialog from './ConfirmDialog';
 
 const ASSET_LABELS = { BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana' };
-const PERIOD_LABELS = { '7d': '7 days', '30d': '30 days', '60d': '60 days', '3m': '3 months', '6m': '6 months', '12m': '12 months', '24m': '24 months', '36m': '36 months' };
+const PERIOD_LABELS = { '7d': '7 days', '30d': '30 days', '60d': '60 days', '3m': '3 months', '6m': '6 months', '12m': '12 months', '24m': '24 months', '36m': '36 months', 'custom': 'Custom' };
 
 function DataDownload() {
   const [formData, setFormData] = useState({ asset: 'BTC', period: '30d' });
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
   const [downloads, setDownloads] = useState([]);
   const [activeDownloadId, setActiveDownloadId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -80,10 +82,28 @@ function DataDownload() {
     setError(null);
     setClearMessage(null);
     try {
+      const payload = { ...formData };
+      if (formData.period === 'custom') {
+        if (!customStart || !customEnd) {
+          setError('Please select both a start and end date');
+          setLoading(false);
+          return;
+        }
+        const startDate = new Date(customStart);
+        const endDate = new Date(customEnd);
+        endDate.setHours(23, 59, 59, 999);
+        if (endDate <= startDate) {
+          setError('End date must be after start date');
+          setLoading(false);
+          return;
+        }
+        payload.customStart = Math.floor(startDate.getTime() / 1000);
+        payload.customEnd = Math.floor(endDate.getTime() / 1000);
+      }
       const res = await fetch('/api/data-downloads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Failed to start data download');
       const result = await res.json();
@@ -239,9 +259,40 @@ function DataDownload() {
                 <option value="12m">12 months</option>
                 <option value="24m">24 months</option>
                 <option value="36m">36 months</option>
+                <option value="custom">Custom Range</option>
               </select>
             </div>
           </div>
+
+          {formData.period === 'custom' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+              <div className="form-group">
+                <label htmlFor="customStart">Start Date</label>
+                <input
+                  type="date"
+                  id="customStart"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  disabled={loading}
+                  max={customEnd || new Date().toISOString().split('T')[0]}
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="customEnd">End Date</label>
+                <input
+                  type="date"
+                  id="customEnd"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  disabled={loading}
+                  min={customStart}
+                  max={new Date().toISOString().split('T')[0]}
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+            </div>
+          )}
 
           {error && <div style={{ color: '#ef4444', marginTop: '1rem', fontSize: '0.9rem' }}>Error: {error}</div>}
 
@@ -398,7 +449,7 @@ function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket
           )}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontWeight: 500 }}>{PERIOD_LABELS[dl.period] || dl.period}</span>
+              <span style={{ fontWeight: 500 }}>{dl.period === 'custom' ? `${startDate} - ${endDate}` : (PERIOD_LABELS[dl.period] || dl.period)}</span>
               <span style={{
                 fontSize: '0.75rem',
                 padding: '0.15rem 0.5rem',

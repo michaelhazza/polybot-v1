@@ -59,6 +59,10 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- **Custom time period**: Date picker UI for arbitrary start/end date ranges on Data Download tab
+- **Unique constraint**: downloaded_snapshots table enforces UNIQUE(download_id, market_id, timestamp, side) to prevent duplicates at the DB level
+- **INSERT OR IGNORE**: All snapshot inserts use OR IGNORE for safety with the unique constraint
+- **DB init on startup**: server/database/init.js now runs automatically when server starts (imported in server/index.js)
 - **Gamma API now fetches both active AND closed/resolved markets** for historical coverage (12+ months)
 - Refactored market finder: Gamma markets fetched once, only Bitquery trade queries chunked by 7-day windows
 - Added period options: 7d, 30d, 60d, 3m, 6m, 12m, 24m, 36m

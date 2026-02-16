@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS data_downloads (
 
   CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
   CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
-  CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'))
+  CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m', 'custom'))
 );
 
 -- Downloaded markets (per download session)
@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS downloaded_snapshots (
   mid REAL,
   last REAL,
   is_tradable INTEGER,
-  FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+  FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE,
+  UNIQUE (download_id, market_id, timestamp, side)
 );
 `);
 
@@ -366,6 +367,112 @@ if (!isMigrationApplied('add_extended_periods_to_downloads')) {
     console.log('[Migration] Successfully added extended periods (preserved existing data)');
   } else {
     recordMigration('add_extended_periods_to_downloads');
+  }
+}
+
+// Migration: Add 'custom' period option and unique constraint on snapshots
+if (!isMigrationApplied('add_custom_period_and_unique_snapshots')) {
+  const periodCheck = db.prepare(`
+    SELECT sql FROM sqlite_master WHERE type='table' AND name='data_downloads'
+  `).get();
+
+  const needsPeriodUpdate = periodCheck && periodCheck.sql && !periodCheck.sql.includes("'custom'");
+
+  if (needsPeriodUpdate) {
+    console.log('[Migration] Adding custom period and unique snapshot constraint...');
+
+    const existingData = db.prepare('SELECT * FROM data_downloads').all();
+    const existingMarkets = db.prepare('SELECT * FROM downloaded_markets').all();
+    const existingSnapshots = db.prepare('SELECT * FROM downloaded_snapshots').all();
+
+    const uniqueSnapshots = [];
+    const seenKeys = new Set();
+    for (const row of existingSnapshots) {
+      const key = `${row.download_id}_${row.market_id}_${row.timestamp}_${row.side}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueSnapshots.push(row);
+      }
+    }
+    const dupsRemoved = existingSnapshots.length - uniqueSnapshots.length;
+    if (dupsRemoved > 0) {
+      console.log(`[Migration] Removing ${dupsRemoved} duplicate snapshots`);
+    }
+
+    const transaction = db.transaction(() => {
+      db.exec(`
+        DROP TABLE IF EXISTS downloaded_snapshots;
+        DROP TABLE IF EXISTS downloaded_markets;
+        DROP TABLE IF EXISTS data_downloads;
+      `);
+
+      db.exec(`
+        CREATE TABLE data_downloads (
+          id TEXT PRIMARY KEY,
+          asset TEXT NOT NULL,
+          period TEXT NOT NULL,
+          status TEXT NOT NULL,
+          progress_pct REAL DEFAULT 0,
+          stage TEXT DEFAULT 'queued',
+          start_time INTEGER NOT NULL,
+          end_time INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          error_message TEXT,
+          CONSTRAINT valid_download_asset CHECK (asset IN ('BTC', 'ETH', 'SOL')),
+          CONSTRAINT valid_download_status CHECK (status IN ('queued', 'running', 'completed', 'failed', 'stopped')),
+          CONSTRAINT valid_download_period CHECK (period IN ('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m', 'custom'))
+        );
+        CREATE TABLE downloaded_markets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          download_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          asset TEXT,
+          timeframe TEXT,
+          start_time INTEGER,
+          end_time INTEGER,
+          status TEXT,
+          fee_regime TEXT DEFAULT 'fee_free',
+          FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE
+        );
+        CREATE TABLE downloaded_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          download_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          timestamp INTEGER NOT NULL,
+          side TEXT NOT NULL,
+          mid REAL,
+          last REAL,
+          is_tradable INTEGER,
+          FOREIGN KEY (download_id) REFERENCES data_downloads(id) ON DELETE CASCADE,
+          UNIQUE (download_id, market_id, timestamp, side)
+        );
+      `);
+
+      const insertDl = db.prepare('INSERT INTO data_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+      for (const row of existingData) {
+        insertDl.run(row.id, row.asset, row.period, row.status, row.progress_pct, row.stage,
+                     row.start_time, row.end_time, row.created_at, row.completed_at, row.error_message);
+      }
+
+      const insertMkt = db.prepare('INSERT INTO downloaded_markets VALUES (?,?,?,?,?,?,?,?,?)');
+      for (const row of existingMarkets) {
+        insertMkt.run(row.id, row.download_id, row.market_id, row.asset, row.timeframe,
+                      row.start_time, row.end_time, row.status, row.fee_regime);
+      }
+
+      const insertSnap = db.prepare('INSERT INTO downloaded_snapshots VALUES (?,?,?,?,?,?,?,?)');
+      for (const row of uniqueSnapshots) {
+        insertSnap.run(row.id, row.download_id, row.market_id, row.timestamp, row.side,
+                       row.mid, row.last, row.is_tradable);
+      }
+    });
+
+    transaction();
+    recordMigration('add_custom_period_and_unique_snapshots');
+    console.log('[Migration] Successfully added custom period and unique constraint');
+  } else {
+    recordMigration('add_custom_period_and_unique_snapshots');
   }
 }
 

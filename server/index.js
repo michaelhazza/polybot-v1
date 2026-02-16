@@ -8,6 +8,7 @@ import backtestsRouter from './routes/backtests.js';
 import authRouter from './routes/auth.js';
 import dataDownloadsRouter from './routes/data-downloads.js';
 import settingsRouter from './routes/settings.js';
+import './database/init.js';
 
 dotenv.config();
 
