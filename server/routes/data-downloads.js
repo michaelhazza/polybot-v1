@@ -345,6 +345,45 @@ router.delete('/:id', (req, res) => {
   }
 });
 
+router.post('/:id/resume', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const download = db.prepare(`
+      SELECT id, asset, period, status, start_time, end_time FROM data_downloads WHERE id = ?
+    `).get(id);
+
+    if (!download) {
+      return res.status(404).json({ error: 'Download not found' });
+    }
+
+    if (!['running', 'stopped', 'failed'].includes(download.status)) {
+      return res.status(400).json({ error: 'Download cannot be resumed (already completed)' });
+    }
+
+    if (activeDownloads.has(id)) {
+      return res.json({ success: true, downloadId: id, message: 'Download already in progress' });
+    }
+
+    activeDownloads.add(id);
+    db.prepare(`UPDATE data_downloads SET status = 'running', error_message = NULL WHERE id = ?`).run(id);
+
+    processDataDownload(id, download.asset, download.start_time, download.end_time).catch(err => {
+      console.error(`Error resuming download ${id}:`, err);
+      db.prepare(`
+        UPDATE data_downloads SET status = ?, error_message = ? WHERE id = ?
+      `).run('failed', err.message, id);
+    }).finally(() => {
+      activeDownloads.delete(id);
+    });
+
+    res.json({ success: true, downloadId: id, message: 'Resuming download' });
+  } catch (error) {
+    console.error('Error resuming download:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/:id/stop', (req, res) => {
   try {
     const { id } = req.params;

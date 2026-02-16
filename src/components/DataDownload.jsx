@@ -115,6 +115,23 @@ function DataDownload() {
     }
   };
 
+  const handleResume = async (downloadId) => {
+    setLoading(true);
+    setStopping(false);
+    setStage('Resuming download...');
+    setError(null);
+    setClearMessage(null);
+    try {
+      const res = await fetch(`/api/data-downloads/${downloadId}/resume`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to resume download');
+      const result = await res.json();
+      setActiveDownloadId(result.downloadId);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
   const handleStop = async () => {
     if (!activeDownloadId) return;
     setStopping(true);
@@ -344,11 +361,13 @@ function DataDownload() {
               expandedTab={expandedTab}
               expandedMarket={expandedMarket}
               loadingData={loadingData}
+              loading={loading}
               onExpand={handleExpand}
               onSetTab={setExpandedTab}
               onSetMarket={setExpandedMarket}
               onClear={handleClearAsset}
               onExportCSV={handleExportCSV}
+              onResume={handleResume}
             />
           ))}
         </div>
@@ -357,7 +376,7 @@ function DataDownload() {
   );
 }
 
-function AssetGroup({ asset, downloads, expandedId, expandedData, expandedTab, expandedMarket, loadingData, onExpand, onSetTab, onSetMarket, onClear, onExportCSV }) {
+function AssetGroup({ asset, downloads, expandedId, expandedData, expandedTab, expandedMarket, loadingData, loading, onExpand, onSetTab, onSetMarket, onClear, onExportCSV, onResume }) {
   const completedDownloads = downloads.filter(d => d.status === 'completed');
   const totalSnapshots = completedDownloads.reduce((sum, d) => sum + (d.snapshot_count || 0), 0);
   const totalMarkets = completedDownloads.reduce((sum, d) => sum + (d.market_count || 0), 0);
@@ -402,17 +421,19 @@ function AssetGroup({ asset, downloads, expandedId, expandedData, expandedTab, e
           expandedTab={expandedTab}
           expandedMarket={expandedMarket}
           loadingData={loadingData && expandedId === dl.id}
+          loading={loading}
           onExpand={onExpand}
           onSetTab={onSetTab}
           onSetMarket={onSetMarket}
           onExportCSV={onExportCSV}
+          onResume={onResume}
         />
       ))}
     </div>
   );
 }
 
-function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket, loadingData, onExpand, onSetTab, onSetMarket, onExportCSV }) {
+function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket, loadingData, loading, onExpand, onSetTab, onSetMarket, onExportCSV, onResume }) {
   const startDate = new Date(dl.start_time * 1000).toLocaleDateString('en-AU');
   const endDate = new Date(dl.end_time * 1000).toLocaleDateString('en-AU');
   const isClickable = dl.status === 'completed';
@@ -472,6 +493,16 @@ function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket
           <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
             {isExpanded ? 'Click to collapse' : 'Click to inspect'}
           </span>
+        )}
+        {(dl.status === 'running' || dl.status === 'stopped' || dl.status === 'failed') && (
+          <button
+            className="btn"
+            onClick={(e) => { e.stopPropagation(); onResume(dl.id); }}
+            disabled={loading}
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', backgroundColor: '#3b82f6' }}
+          >
+            {loading ? 'Resuming...' : 'Resume'}
+          </button>
         )}
       </div>
 
