@@ -10,7 +10,7 @@ const router = express.Router();
 const SETTINGS_FILE = path.join(__dirname, '../../data/settings.json');
 
 const DEFAULT_SETTINGS = {
-  snapshotInterval: 60,
+  snapshotInterval: 1,
 };
 
 const VALID_INTERVALS = [0, 1, 2, 3, 5, 15, 60];
@@ -24,7 +24,9 @@ function loadSettings() {
   } catch (err) {
     console.error('[Settings] Error loading settings:', err.message);
   }
-  return { ...DEFAULT_SETTINGS };
+  const defaults = { ...DEFAULT_SETTINGS };
+  saveSettings(defaults);
+  return defaults;
 }
 
 function saveSettings(settings) {
