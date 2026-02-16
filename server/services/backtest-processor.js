@@ -165,21 +165,7 @@ class BacktestProcessor {
     `).run(error.message, runId);
   }
 
-  /**
-   * Fetch market data from Polymarket or generate synthetic
-   */
   async fetchMarketData(run) {
-    // Use live Polymarket API for production data
-    const useSynthetic = false; // Toggle for synthetic testing data
-
-    if (useSynthetic) {
-      return await polymarketClient.generateSyntheticData(
-        run.asset,
-        run.analysis_start,
-        run.analysis_end,
-        5 // tick interval
-      );
-    } else {
       const markets = await polymarketClient.fetchMarkets(
         run.asset,
         run.timeframe,
@@ -187,19 +173,11 @@ class BacktestProcessor {
         run.analysis_end
       );
 
-      // Limit markets to prevent runaway jobs
       const limitedMarkets = markets.slice(0, MAX_MARKETS_PER_RUN);
 
       if (limitedMarkets.length === 0) {
         console.warn(`No markets found for ${run.asset} from ${run.analysis_start} to ${run.analysis_end}`);
-        // Fall back to synthetic data if no live markets found
-        console.log('Falling back to synthetic data');
-        return await polymarketClient.generateSyntheticData(
-          run.asset,
-          run.analysis_start,
-          run.analysis_end,
-          5 // tick interval
-        );
+        return { markets: [], snapshots: [] };
       }
 
       const allSnapshots = [];
@@ -213,7 +191,6 @@ class BacktestProcessor {
       }
 
       return { markets: limitedMarkets, snapshots: allSnapshots };
-    }
   }
 
   /**

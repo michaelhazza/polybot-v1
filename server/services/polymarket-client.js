@@ -70,8 +70,7 @@ class PolymarketClient {
       // Special handling for quota errors
       if (error.code === 'QUOTA_EXCEEDED') {
         console.warn('[PolymarketClient] Bitquery quota exceeded.');
-        console.warn('[PolymarketClient] Cannot fetch markets. Please wait for quota reset or use synthetic data.');
-        // Return empty array for quota errors - caller should handle fallback
+        console.warn('[PolymarketClient] Cannot fetch markets. Please wait for quota reset.');
         return [];
       }
 
@@ -347,100 +346,6 @@ class PolymarketClient {
     return 60;
   }
 
-  _seededRandom(seed) {
-    let s = seed;
-    return () => {
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      return s / 0x7fffffff;
-    };
-  }
-
-  _hashSeed(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash = hash & hash;
-    }
-    return Math.abs(hash) || 1;
-  }
-
-  getMarketInfo(asset, startTime, endTime) {
-    const marketId = `synthetic_${asset}_${startTime}`;
-    return {
-      market_id: marketId,
-      asset,
-      timeframe: '15min',
-      start_time: startTime,
-      end_time: endTime,
-      status: 'closed',
-      fee_regime: 'fee_free'
-    };
-  }
-
-  getTotalTickCount(startTime, endTime, tickIntervalSeconds = 5) {
-    return Math.floor((endTime - startTime) / tickIntervalSeconds) + 1;
-  }
-
-  async generateSyntheticData(asset, startTime, endTime, tickIntervalSeconds = 5) {
-    const market = this.getMarketInfo(asset, startTime, endTime);
-    const snapshots = [];
-
-    for (const tick of this.generateSyntheticTicks(asset, startTime, endTime, tickIntervalSeconds)) {
-      snapshots.push(tick);
-    }
-
-    return {
-      markets: [market],
-      snapshots
-    };
-  }
-
-  *generateSyntheticTicks(asset, startTime, endTime, tickIntervalSeconds = 5, resumeFromTimestamp = null) {
-    const seed = this._hashSeed(`${asset}_${startTime}_${endTime}`);
-    const random = this._seededRandom(seed);
-    const marketId = `synthetic_${asset}_${startTime}`;
-
-    let currentTime = startTime;
-    let basePrice = 0.5;
-
-    while (currentTime <= endTime) {
-      const drift = (0.5 - basePrice) * 0.01;
-      const volatility = 0.002;
-      basePrice += drift + (random() - 0.5) * volatility;
-      basePrice = Math.max(0.3, Math.min(0.7, basePrice));
-
-      let upMid = basePrice;
-      let downMid = 1 - basePrice;
-
-      if (random() < 0.05) {
-        const discount = 0.003 + random() * 0.007;
-        upMid = basePrice - discount / 2;
-        downMid = (1 - basePrice) - discount / 2;
-      }
-
-      if (resumeFromTimestamp === null || currentTime > resumeFromTimestamp) {
-        yield {
-          market_id: marketId,
-          timestamp: currentTime,
-          side: 'UP',
-          mid: upMid,
-          last: upMid,
-          is_tradable: 1
-        };
-
-        yield {
-          market_id: marketId,
-          timestamp: currentTime,
-          side: 'DOWN',
-          mid: downMid,
-          last: downMid,
-          is_tradable: 1
-        };
-      }
-
-      currentTime += tickIntervalSeconds;
-    }
-  }
 }
 
 export default new PolymarketClient();

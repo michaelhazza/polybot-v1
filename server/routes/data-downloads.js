@@ -610,9 +610,6 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
   };
 
   try {
-    const useLiveAPI = true;
-
-    if (useLiveAPI) {
       updateProgress(-1, 'Checking existing data coverage...');
       const existingCoverage = getExistingCoverage(asset, startTime, endTime);
 
@@ -626,11 +623,12 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
 
       if (markets.length === 0) {
         console.warn(`[DataDownload] No markets found for ${asset}`);
-        console.warn(`[DataDownload] This may be due to Bitquery quota limits or no matching markets`);
-        console.warn(`[DataDownload] Falling back to synthetic data`);
+        console.warn(`[DataDownload] This may be due to Bitquery quota limits or no matching markets in this date range`);
 
-        updateProgress(-1, 'No real data available, using synthetic data...');
-        await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
+        updateProgress(100, 'No markets found for this asset/date range');
+        db.prepare(`
+          UPDATE data_downloads SET status = ?, completed_at = ?, error_message = ? WHERE id = ?
+        `).run('failed', Math.floor(Date.now() / 1000), 'No markets found for this asset and date range. Check that Bitquery quota is available and the date range contains active markets.', downloadId);
         return;
       }
 
@@ -770,11 +768,6 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
       `).run('completed', Math.floor(Date.now() / 1000), downloadId);
 
-    } else {
-      // Fall back to synthetic data
-      await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
-    }
-
   } catch (error) {
     console.error('Error in processDataDownload:', error);
     db.prepare(`
@@ -782,116 +775,6 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
     `).run('failed', error.message, downloadId);
     throw error;
   }
-}
-
-async function processDataDownloadSynthetic(downloadId, asset, startTime, endTime) {
-  const updateProgress = (progress, stage) => {
-    db.prepare(`
-      UPDATE data_downloads SET progress_pct = ?, stage = ? WHERE id = ?
-    `).run(progress, stage, downloadId);
-  };
-
-  const lastSaved = db.prepare(`
-    SELECT MAX(timestamp) as last_ts FROM downloaded_snapshots WHERE download_id = ?
-  `).get(downloadId);
-
-  const resumeFromTimestamp = lastSaved?.last_ts || null;
-
-  const hasMarkets = db.prepare(`
-    SELECT COUNT(*) as count FROM downloaded_markets WHERE download_id = ?
-  `).get(downloadId).count > 0;
-
-  const market = polymarketClient.getMarketInfo(asset, startTime, endTime);
-  const totalTicks = polymarketClient.getTotalTickCount(startTime, endTime, 5);
-  const totalSnapshots = totalTicks * 2;
-
-  if (!hasMarkets) {
-    updateProgress(0, 'Saving market info (synthetic)...');
-    db.prepare(`
-      INSERT INTO downloaded_markets
-      (download_id, market_id, asset, timeframe, start_time, end_time, status, fee_regime)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      downloadId, market.market_id, market.asset, market.timeframe,
-      market.start_time, market.end_time, market.status, market.fee_regime
-    );
-  }
-
-  let savedAlready = 0;
-  if (resumeFromTimestamp !== null) {
-    savedAlready = db.prepare(`
-      SELECT COUNT(*) as count FROM downloaded_snapshots WHERE download_id = ?
-    `).get(downloadId).count;
-    const pct = Math.round((savedAlready / totalSnapshots) * 100);
-    console.log(`Resuming download ${downloadId}: ${savedAlready} snapshots already saved (${pct}%), continuing from timestamp ${resumeFromTimestamp}`);
-    updateProgress(pct, `Resumed from ${pct}%...`);
-  }
-
-  const insertSnapshot = db.prepare(`
-    INSERT INTO downloaded_snapshots
-    (download_id, market_id, timestamp, side, mid, last, is_tradable)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const generator = polymarketClient.generateSyntheticTicks(asset, startTime, endTime, 5, resumeFromTimestamp);
-
-  let batch = [];
-  let insertedSinceResume = 0;
-  const batchSize = 1000;
-
-  for (const tick of generator) {
-    batch.push(tick);
-
-    if (batch.length >= batchSize) {
-      if (cancelledDownloads.has(downloadId)) {
-        cancelledDownloads.delete(downloadId);
-        const totalSaved = savedAlready + insertedSinceResume;
-        const pct = Math.round((totalSaved / totalSnapshots) * 100);
-        updateProgress(pct, `Stopped at ${pct}% (${totalSaved.toLocaleString()} snapshots saved)`);
-        db.prepare(`
-          UPDATE data_downloads SET status = 'stopped' WHERE id = ?
-        `).run(downloadId);
-        console.log(`Download ${downloadId} stopped by user at ${pct}%`);
-        return;
-      }
-
-      const currentBatch = batch;
-      const transaction = db.transaction(() => {
-        for (const snapshot of currentBatch) {
-          insertSnapshot.run(
-            downloadId, snapshot.market_id, snapshot.timestamp,
-            snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
-          );
-        }
-      });
-      transaction();
-
-      insertedSinceResume += currentBatch.length;
-      const totalSaved = savedAlready + insertedSinceResume;
-      const pct = Math.round((totalSaved / totalSnapshots) * 100);
-      updateProgress(pct, `Saving snapshots (${totalSaved.toLocaleString()}/${totalSnapshots.toLocaleString()})...`);
-
-      batch = [];
-      await new Promise(resolve => setTimeout(resolve, 5));
-    }
-  }
-
-  if (batch.length > 0) {
-    const transaction = db.transaction(() => {
-      for (const snapshot of batch) {
-        insertSnapshot.run(
-          downloadId, snapshot.market_id, snapshot.timestamp,
-          snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
-        );
-      }
-    });
-    transaction();
-  }
-
-  updateProgress(100, 'Completed (synthetic)');
-  db.prepare(`
-    UPDATE data_downloads SET status = ?, completed_at = ? WHERE id = ?
-  `).run('completed', Math.floor(Date.now() / 1000), downloadId);
 }
 
 export default router;

@@ -8,11 +8,10 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - **Backend**: Express.js API (port 3001 in dev, port 5000 in production)
 - **Database**: SQLite via better-sqlite3, stored at `data/polymarket.db`
 - **Build**: Vite builds to `dist/`
-- **Data Sources**: Dual-source architecture
+- **Data Sources**: Dual-source architecture (real data only, no synthetic fallback)
   - **Polymarket Gamma API**: Market discovery (has human-readable market names/questions)
   - **Bitquery V2 GraphQL**: Historical trade data via DEXTradeByTokens on Polygon (blockchain records)
   - **Polymarket CLOB API**: Alternative price history source (not currently active)
-  - **Synthetic fallback**: Auto-generated data when no live markets found
 
 ## Key Directories
 - `src/` - React frontend components
@@ -38,7 +37,6 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - **Snapshot Processing**: Trades bucketed into 5-minute intervals, YES/NO sides determined by token ID matching
 - **Deduplication**: Before Bitquery API calls, checks existing DB coverage per market; skips API for markets already downloaded, copies cached data instead
 - Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time
-- Synthetic fallback: Automatically generates synthetic data when no live markets found
 - Stop/Resume: Downloads can be stopped mid-progress and resumed later
 - Clear Data: Users can clear downloaded data for specific asset/period combinations
 
@@ -59,6 +57,8 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- **Removed all synthetic data**: System now only works with real Bitquery/Gamma API data. No synthetic fallback. If no markets are found, download reports failure instead of generating fake data.
+- **Snapshot interval**: Default 1-minute (60s) intervals for trade bucketing
 - **Market date filtering**: Gamma API results now filtered by endDate to exclude markets that ended before the query start time (prevents querying irrelevant old markets like 2020 election markets)
 - **Bitquery credit protection**: When batch Bitquery query returns 0 trades for all markets, returns empty instead of sending hundreds of individual queries that waste API credits
 - **Cross-download analysis**: Analyse Data section on Data Download tab combines data from all completed downloads for a custom date range

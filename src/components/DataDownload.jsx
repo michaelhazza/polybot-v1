@@ -682,7 +682,7 @@ function ExpandedDataView({ data, dl, activeTab, selectedMarket, onSetTab, onSet
         }
       }
 
-      marketMap[mid] = { id: mid, label: mid.startsWith('synthetic_') ? 'Synthetic Market' : mid.substring(0, 12) + '...', paired, yesCount: yesMap.size, noCount: noMap.size };
+      marketMap[mid] = { id: mid, label: mid.substring(0, 12) + '...', paired, yesCount: yesMap.size, noCount: noMap.size };
     }
 
     return { marketIds, marketMap };
