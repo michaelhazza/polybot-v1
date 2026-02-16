@@ -57,6 +57,9 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- **Fixed Bitquery API timeout**: Removed `dataset: combined` from all GraphQL queries - this parameter caused the Bitquery V2 API to timeout/return empty. Without it, queries respond instantly with real trade data.
+- **Improved Gamma market filtering**: Added creation date filter to exclude very old markets (>2 years before query start). Prevents 2020-era markets from being included.
+- **Future date validation**: Download endpoint now clamps end dates to current time and rejects invalid date ranges.
 - **Removed all synthetic data**: System now only works with real Bitquery/Gamma API data. No synthetic fallback. If no markets are found, download reports failure instead of generating fake data.
 - **Snapshot interval**: Default 1-minute (60s) intervals for trade bucketing
 - **Market date filtering**: Gamma API results now filtered by endDate to exclude markets that ended before the query start time (prevents querying irrelevant old markets like 2020 election markets)
@@ -74,7 +77,7 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - Migrated Bitquery integration from V1 to V2 streaming schema
 - Refactored from raw blockchain Events to efficient DEXTradeByTokens API
 - Auto-prefixes "Bearer " to Bitquery OAuth token in bitquery-client.js
-- Updated all GraphQL queries for V2: `is` filters, `dataset: combined`, `DateTime` types
+- Updated all GraphQL queries for V2: `is` filters, `DateTime` types (no `dataset: combined` - causes timeouts)
 - Token ID matching: maps on-chain trade Ids to YES/NO outcomes via Gamma CLOB token IDs
 - Redesigned DataDownload with expandable inspection (Arbitrage View, Price Chart, Raw Data)
 - Added stop/resume functionality and clear data for downloads

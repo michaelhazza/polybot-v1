@@ -132,6 +132,13 @@ router.post('/', async (req, res) => {
       endTime = now;
     }
 
+    if (endTime > now) {
+      endTime = now;
+    }
+    if (startTime >= endTime) {
+      return res.status(400).json({ error: 'Start date must be before end date (and not in the future)' });
+    }
+
     db.prepare(`
       INSERT INTO data_downloads
       (id, asset, period, status, progress_pct, stage, start_time, end_time, created_at)
