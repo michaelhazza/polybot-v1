@@ -1,7 +1,11 @@
 import axios from 'axios';
+import bitqueryClient from '../../lib/bitquery-client.js';
+import { discoverMarketsByAsset, batchDiscoverMarkets } from '../../lib/polymarket-market-finder.js';
+import { aggregateOrderFilledEvents, createTokenMapping } from '../../lib/data-mappers.js';
 
 const POLYMARKET_API_BASE = process.env.POLYMARKET_API_BASE || 'https://clob.polymarket.com';
 const GAMMA_API_BASE = 'https://gamma-api.polymarket.com';
+const USE_BITQUERY = process.env.USE_BITQUERY === 'true' || true; // Default to Bitquery
 
 class PolymarketClient {
   constructor() {
@@ -16,9 +20,60 @@ class PolymarketClient {
       'ETH': [/\bethereum\b/i, /(?<![a-z])eth(?![a-z])/i, /\$eth/i],
       'SOL': [/\bsolana\b/i, /(?<![a-z])sol(?![a-z])/i, /\$sol/i]
     };
+    this.useBitquery = USE_BITQUERY;
+    console.log(`[PolymarketClient] Data source: ${this.useBitquery ? 'Bitquery (blockchain)' : 'Polymarket API'}`);
   }
 
   async fetchMarkets(asset, timeframe, startTime, endTime) {
+    // Use Bitquery if enabled, otherwise fall back to Polymarket API
+    if (this.useBitquery) {
+      return this._fetchMarketsBitquery(asset, timeframe, startTime, endTime);
+    } else {
+      return this._fetchMarketsPolymarketAPI(asset, timeframe, startTime, endTime);
+    }
+  }
+
+  async _fetchMarketsBitquery(asset, timeframe, startTime, endTime) {
+    try {
+      console.log(`[PolymarketClient] Fetching ${asset} markets via Bitquery...`);
+
+      const startDate = new Date(startTime * 1000);
+      const endDate = new Date(endTime * 1000);
+
+      // Use batch discovery for large time ranges (> 7 days)
+      const daysDiff = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      let markets;
+
+      if (daysDiff > 7) {
+        console.log(`[PolymarketClient] Large time range (${daysDiff.toFixed(1)} days), using batch discovery`);
+        markets = await batchDiscoverMarkets(asset, timeframe, startDate, endDate, 7);
+      } else {
+        markets = await discoverMarketsByAsset(asset, timeframe, startDate, endDate);
+      }
+
+      console.log(`[PolymarketClient] Found ${markets.length} markets via Bitquery`);
+
+      // Transform to expected format
+      return markets.map(m => ({
+        market_id: m.market_id,
+        question: m.question,
+        asset,
+        timeframe,
+        start_time: Math.floor(new Date(m.startDate).getTime() / 1000),
+        end_time: endTime,
+        status: m.metadata?.status || 'active',
+        fee_regime: 'fee_free',
+        clob_token_ids: m.clobTokenIds || ['0', '1'],
+        token_mapping: m.metadata?.is_up_down ? { '0': 'UP', '1': 'DOWN' } : { '0': 'YES', '1': 'NO' }
+      }));
+    } catch (error) {
+      console.error('[PolymarketClient] Error fetching markets via Bitquery:', error.message);
+      console.error('[PolymarketClient] Falling back to empty result');
+      return [];
+    }
+  }
+
+  async _fetchMarketsPolymarketAPI(asset, timeframe, startTime, endTime) {
     try {
       const keywords = this.assetKeywords[asset.toUpperCase()] || [asset.toLowerCase()];
       const allMarkets = [];
@@ -78,6 +133,52 @@ class PolymarketClient {
   }
 
   async fetchSnapshots(market, startTime, endTime) {
+    // Use Bitquery if enabled, otherwise fall back to Polymarket API
+    if (this.useBitquery) {
+      return this._fetchSnapshotsBitquery(market, startTime, endTime);
+    } else {
+      return this._fetchSnapshotsPolymarketAPI(market, startTime, endTime);
+    }
+  }
+
+  async _fetchSnapshotsBitquery(market, startTime, endTime) {
+    try {
+      console.log(`[PolymarketClient] Fetching snapshots for ${market.market_id} via Bitquery...`);
+
+      const startDate = new Date(startTime * 1000).toISOString();
+      const endDate = new Date(endTime * 1000).toISOString();
+
+      // Fetch OrderFilled events
+      const events = await bitqueryClient.queryOrderFilledEvents(
+        market.market_id,
+        startDate,
+        endDate,
+        10000 // Max events to fetch
+      );
+
+      console.log(`[PolymarketClient] Found ${events.length} OrderFilled events`);
+
+      if (events.length === 0) {
+        console.warn(`[PolymarketClient] No OrderFilled events found for market ${market.market_id}`);
+        return [];
+      }
+
+      // Create token mapping from market metadata
+      const tokenMapping = market.token_mapping || createTokenMapping(market.market_id, market.question || '');
+
+      // Transform events to snapshots
+      const snapshots = aggregateOrderFilledEvents(events, market.market_id, tokenMapping);
+
+      console.log(`[PolymarketClient] Transformed to ${snapshots.length} snapshots`);
+
+      return snapshots;
+    } catch (error) {
+      console.error(`[PolymarketClient] Error fetching snapshots via Bitquery for ${market.market_id}:`, error.message);
+      return [];
+    }
+  }
+
+  async _fetchSnapshotsPolymarketAPI(market, startTime, endTime) {
     try {
       const tokenIds = market.clob_token_ids || [];
       if (tokenIds.length === 0) {
