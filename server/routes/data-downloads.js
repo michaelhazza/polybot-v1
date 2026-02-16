@@ -188,13 +188,34 @@ router.get('/analyze/range', (req, res) => {
     const ids = completedDownloads.map(d => d.id);
     const placeholders = ids.map(() => '?').join(',');
 
-    const snapshots = db.prepare(`
-      SELECT market_id, timestamp, side, mid, last, is_tradable
-      FROM downloaded_snapshots
+    const totalCount = db.prepare(`
+      SELECT COUNT(*) as cnt FROM downloaded_snapshots
       WHERE download_id IN (${placeholders})
         AND timestamp >= ? AND timestamp <= ?
-      ORDER BY timestamp ASC
-    `).all(...ids, startTime, endTime);
+    `).all(...ids, startTime, endTime)[0].cnt;
+
+    const MAX_SNAPSHOTS = 50000;
+    let snapshots;
+
+    if (totalCount <= MAX_SNAPSHOTS) {
+      snapshots = db.prepare(`
+        SELECT market_id, timestamp, side, mid, last, is_tradable
+        FROM downloaded_snapshots
+        WHERE download_id IN (${placeholders})
+          AND timestamp >= ? AND timestamp <= ?
+        ORDER BY timestamp ASC
+      `).all(...ids, startTime, endTime);
+    } else {
+      const sampleRate = Math.ceil(totalCount / MAX_SNAPSHOTS);
+      snapshots = db.prepare(`
+        SELECT market_id, timestamp, side, mid, last, is_tradable
+        FROM downloaded_snapshots
+        WHERE download_id IN (${placeholders})
+          AND timestamp >= ? AND timestamp <= ?
+          AND rowid % ? = 0
+        ORDER BY timestamp ASC
+      `).all(...ids, startTime, endTime, sampleRate);
+    }
 
     const seen = new Set();
     const dedupedSnapshots = [];
@@ -222,22 +243,17 @@ router.get('/analyze/range', (req, res) => {
     }
 
     res.json({
-      snapshots: dedupedSnapshots.map(s => ({
-        market_id: s.market_id,
-        timestamp: s.timestamp,
-        side: s.side,
-        mid: s.mid,
-        last: s.last,
-        is_tradable: s.is_tradable
-      })),
+      snapshots: dedupedSnapshots,
       markets: dedupedMarkets,
       meta: {
         asset,
         start_time: startTime,
         end_time: endTime,
-        total_snapshots: dedupedSnapshots.length,
+        total_snapshots: totalCount,
+        returned_snapshots: dedupedSnapshots.length,
         total_markets: dedupedMarkets.length,
-        source_downloads: completedDownloads.length
+        source_downloads: completedDownloads.length,
+        sampled: totalCount > MAX_SNAPSHOTS
       }
     });
   } catch (error) {
@@ -286,10 +302,28 @@ router.get('/:id/data', (req, res) => {
       SELECT * FROM downloaded_markets WHERE download_id = ?
     `).all(id);
 
-    const snapshots = db.prepare(`
-      SELECT * FROM downloaded_snapshots WHERE download_id = ?
-      ORDER BY timestamp ASC
-    `).all(id);
+    const totalCount = db.prepare(`
+      SELECT COUNT(*) as cnt FROM downloaded_snapshots WHERE download_id = ?
+    `).get(id).cnt;
+
+    const MAX_SNAPSHOTS = 50000;
+    let snapshots;
+
+    if (totalCount <= MAX_SNAPSHOTS) {
+      snapshots = db.prepare(`
+        SELECT market_id, timestamp, side, mid, last, is_tradable
+        FROM downloaded_snapshots WHERE download_id = ?
+        ORDER BY timestamp ASC
+      `).all(id);
+    } else {
+      const sampleRate = Math.ceil(totalCount / MAX_SNAPSHOTS);
+      snapshots = db.prepare(`
+        SELECT market_id, timestamp, side, mid, last, is_tradable
+        FROM downloaded_snapshots WHERE download_id = ?
+        AND rowid % ? = 0
+        ORDER BY timestamp ASC
+      `).all(id, sampleRate);
+    }
 
     res.json({
       download: {
@@ -300,14 +334,12 @@ router.get('/:id/data', (req, res) => {
         end_time: download.end_time
       },
       markets,
-      snapshots: snapshots.map(s => ({
-        market_id: s.market_id,
-        timestamp: s.timestamp,
-        side: s.side,
-        mid: s.mid,
-        last: s.last,
-        is_tradable: s.is_tradable
-      }))
+      snapshots,
+      meta: {
+        total_snapshots: totalCount,
+        returned_snapshots: snapshots.length,
+        sampled: totalCount > MAX_SNAPSHOTS
+      }
     });
   } catch (error) {
     console.error('Error fetching download data:', error);

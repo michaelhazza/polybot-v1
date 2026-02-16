@@ -747,12 +747,16 @@ function ArbitrageView({ marketData }) {
       {markets.map((market, idx) => {
         const paired = market.paired;
         if (paired.length === 0) return null;
-        const combinedPrices = paired.map(p => p.combined);
-        const minC = Math.min(...combinedPrices);
-        const maxC = Math.max(...combinedPrices);
-        const avgC = combinedPrices.reduce((a, b) => a + b, 0) / combinedPrices.length;
-        const subOneCount = combinedPrices.filter(p => p < 0.9999).length;
-        const subOnePct = ((subOneCount / combinedPrices.length) * 100).toFixed(1);
+        let minC = Infinity, maxC = -Infinity, sumC = 0, subOneCount = 0;
+        for (let j = 0; j < paired.length; j++) {
+          const c = paired[j].combined;
+          if (c < minC) minC = c;
+          if (c > maxC) maxC = c;
+          sumC += c;
+          if (c < 0.9999) subOneCount++;
+        }
+        const avgC = sumC / paired.length;
+        const subOnePct = ((subOneCount / paired.length) * 100).toFixed(1);
         const chartMin = Math.min(minC, 0.95);
         const chartMax = Math.max(maxC, 1.05);
         const chartRange = chartMax - chartMin;
@@ -805,22 +809,29 @@ function ArbitrageView({ marketData }) {
                   </g>
                 );
               })}
-              <polyline
-                points={paired.map((p, i) => {
-                  const x = 50 + (i / Math.max(paired.length - 1, 1)) * 710;
-                  const y = 180 - ((p.combined - chartMin) / chartRange) * 160;
-                  return `${x},${y}`;
-                }).join(' ')}
-                fill="none" stroke={color} strokeWidth="1.5" opacity="0.9"
-              />
+              {(() => {
+                const maxPoints = 800;
+                const step = paired.length > maxPoints ? Math.ceil(paired.length / maxPoints) : 1;
+                const pts = [];
+                for (let pi = 0; pi < paired.length; pi += step) {
+                  const x = 50 + (pi / Math.max(paired.length - 1, 1)) * 710;
+                  const y = 180 - ((paired[pi].combined - chartMin) / chartRange) * 160;
+                  pts.push(`${x},${y}`);
+                }
+                return <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" opacity="0.9" />;
+              })()}
               {(() => {
                 const oneY = 180 - ((1.0 - chartMin) / chartRange) * 160;
-                return paired.filter(p => p.combined < 0.9999).map((p, i) => {
-                  const idx2 = paired.indexOf(p);
-                  const x = 50 + (idx2 / Math.max(paired.length - 1, 1)) * 710;
-                  const y = 180 - ((p.combined - chartMin) / chartRange) * 160;
-                  return <line key={i} x1={x} y1={oneY} x2={x} y2={y} stroke="#22c55e" strokeWidth="1" opacity="0.3" />;
-                });
+                const maxMarkers = 200;
+                const subOnes = [];
+                for (let pi = 0; pi < paired.length && subOnes.length < maxMarkers; pi++) {
+                  if (paired[pi].combined < 0.9999) {
+                    const x = 50 + (pi / Math.max(paired.length - 1, 1)) * 710;
+                    const y = 180 - ((paired[pi].combined - chartMin) / chartRange) * 160;
+                    subOnes.push(<line key={pi} x1={x} y1={oneY} x2={x} y2={y} stroke="#22c55e" strokeWidth="1" opacity="0.3" />);
+                  }
+                }
+                return subOnes;
               })()}
             </svg>
 
