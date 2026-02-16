@@ -23,6 +23,13 @@ function DataDownload() {
   const [clearing, setClearing] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState({ open: false });
   const [clearMessage, setClearMessage] = useState(null);
+  const [analyseAsset, setAnalyseAsset] = useState('BTC');
+  const [analyseStart, setAnalyseStart] = useState('');
+  const [analyseEnd, setAnalyseEnd] = useState('');
+  const [analyseData, setAnalyseData] = useState(null);
+  const [analyseLoading, setAnalyseLoading] = useState(false);
+  const [analyseTab, setAnalyseTab] = useState('arbitrage');
+  const [analyseMarket, setAnalyseMarket] = useState('all');
 
   const fetchDownloads = async () => {
     try {
@@ -115,14 +122,21 @@ function DataDownload() {
     }
   };
 
-  const handleResume = async (downloadId) => {
+  const handleResume = async (dl) => {
+    setFormData({ asset: dl.asset, period: dl.period });
+    if (dl.period === 'custom') {
+      const startStr = new Date(dl.start_time * 1000).toISOString().split('T')[0];
+      const endStr = new Date(dl.end_time * 1000).toISOString().split('T')[0];
+      setCustomStart(startStr);
+      setCustomEnd(endStr);
+    }
     setLoading(true);
     setStopping(false);
     setStage('Resuming download...');
     setError(null);
     setClearMessage(null);
     try {
-      const res = await fetch(`/api/data-downloads/${downloadId}/resume`, { method: 'POST' });
+      const res = await fetch(`/api/data-downloads/${dl.id}/resume`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to resume download');
       const result = await res.json();
       setActiveDownloadId(result.downloadId);
@@ -202,6 +216,38 @@ function DataDownload() {
       setExpandedId(null);
     } finally {
       setLoadingData(false);
+    }
+  };
+
+  const handleAnalyse = async (e) => {
+    e.preventDefault();
+    if (!analyseStart || !analyseEnd) {
+      setError('Please select both start and end dates for analysis');
+      return;
+    }
+    const startDate = new Date(analyseStart);
+    const endDate = new Date(analyseEnd);
+    endDate.setHours(23, 59, 59, 999);
+    if (endDate <= startDate) {
+      setError('End date must be after start date');
+      return;
+    }
+    setAnalyseLoading(true);
+    setAnalyseData(null);
+    setAnalyseTab('arbitrage');
+    setAnalyseMarket('all');
+    setError(null);
+    try {
+      const startTs = Math.floor(startDate.getTime() / 1000);
+      const endTs = Math.floor(endDate.getTime() / 1000);
+      const res = await fetch(`/api/data-downloads/analyze/range?asset=${analyseAsset}&start=${startTs}&end=${endTs}`);
+      if (!res.ok) throw new Error('Failed to load analysis data');
+      const data = await res.json();
+      setAnalyseData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAnalyseLoading(false);
     }
   };
 
@@ -372,6 +418,88 @@ function DataDownload() {
           ))}
         </div>
       )}
+
+      <div className="card" style={{ marginTop: '1.5rem' }}>
+        <h2>Analyse Data</h2>
+        <p style={{ color: '#94a3b8', marginBottom: '1.5rem' }}>
+          View analysis across all downloaded data for a custom date range. Combines data from all completed downloads.
+        </p>
+
+        <form onSubmit={handleAnalyse}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+            <div className="form-group">
+              <label htmlFor="analyseAsset">Asset</label>
+              <select id="analyseAsset" value={analyseAsset} onChange={(e) => setAnalyseAsset(e.target.value)} disabled={analyseLoading}>
+                <option value="BTC">Bitcoin (BTC)</option>
+                <option value="ETH">Ethereum (ETH)</option>
+                <option value="SOL">Solana (SOL)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="analyseStart">Start Date</label>
+              <input
+                type="date"
+                id="analyseStart"
+                value={analyseStart}
+                onChange={(e) => setAnalyseStart(e.target.value)}
+                disabled={analyseLoading}
+                max={analyseEnd || new Date().toISOString().split('T')[0]}
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="analyseEnd">End Date</label>
+              <input
+                type="date"
+                id="analyseEnd"
+                value={analyseEnd}
+                onChange={(e) => setAnalyseEnd(e.target.value)}
+                disabled={analyseLoading}
+                min={analyseStart}
+                max={new Date().toISOString().split('T')[0]}
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '1rem' }}>
+            <button type="submit" className="btn" disabled={analyseLoading || !analyseStart || !analyseEnd}>
+              {analyseLoading ? 'Loading...' : 'Analyse'}
+            </button>
+          </div>
+        </form>
+
+        {analyseLoading && (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>Loading analysis data...</div>
+        )}
+
+        {analyseData && (
+          <div style={{ marginTop: '1.5rem' }}>
+            <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <span>{analyseData.meta.total_markets} market{analyseData.meta.total_markets !== 1 ? 's' : ''}</span>
+              <span>{analyseData.meta.total_snapshots.toLocaleString()} data points</span>
+              <span>
+                {new Date(analyseData.meta.start_time * 1000).toLocaleDateString('en-AU')} - {new Date(analyseData.meta.end_time * 1000).toLocaleDateString('en-AU')}
+              </span>
+              <span>from {analyseData.meta.source_downloads} download{analyseData.meta.source_downloads !== 1 ? 's' : ''}</span>
+            </div>
+            {analyseData.snapshots.length > 0 ? (
+              <ExpandedDataView
+                data={{ snapshots: analyseData.snapshots }}
+                dl={{ asset: analyseAsset, period: 'custom' }}
+                activeTab={analyseTab}
+                selectedMarket={analyseMarket}
+                onSetTab={setAnalyseTab}
+                onSetMarket={setAnalyseMarket}
+                onExportCSV={() => {}}
+              />
+            ) : (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                No data found for this date range. Make sure you have downloaded data that covers this period.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -497,7 +625,7 @@ function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket
         {(dl.status === 'running' || dl.status === 'stopped' || dl.status === 'failed') && (
           <button
             className="btn"
-            onClick={(e) => { e.stopPropagation(); onResume(dl.id); }}
+            onClick={(e) => { e.stopPropagation(); onResume(dl); }}
             disabled={loading}
             style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', backgroundColor: '#3b82f6' }}
           >

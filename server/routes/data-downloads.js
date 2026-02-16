@@ -161,6 +161,91 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.get('/analyze/range', (req, res) => {
+  try {
+    const { asset, start, end } = req.query;
+
+    if (!asset || !start || !end) {
+      return res.status(400).json({ error: 'Missing required query params: asset, start, end' });
+    }
+
+    const startTime = parseInt(start, 10);
+    const endTime = parseInt(end, 10);
+
+    if (isNaN(startTime) || isNaN(endTime) || endTime <= startTime) {
+      return res.status(400).json({ error: 'Invalid start/end timestamps' });
+    }
+
+    const completedDownloads = db.prepare(`
+      SELECT id FROM data_downloads
+      WHERE asset = ? AND status = 'completed'
+    `).all(asset);
+
+    if (completedDownloads.length === 0) {
+      return res.json({ snapshots: [], markets: [], meta: { asset, start_time: startTime, end_time: endTime, total_snapshots: 0, total_markets: 0, source_downloads: 0 } });
+    }
+
+    const ids = completedDownloads.map(d => d.id);
+    const placeholders = ids.map(() => '?').join(',');
+
+    const snapshots = db.prepare(`
+      SELECT market_id, timestamp, side, mid, last, is_tradable
+      FROM downloaded_snapshots
+      WHERE download_id IN (${placeholders})
+        AND timestamp >= ? AND timestamp <= ?
+      ORDER BY timestamp ASC
+    `).all(...ids, startTime, endTime);
+
+    const seen = new Set();
+    const dedupedSnapshots = [];
+    for (const s of snapshots) {
+      const key = `${s.market_id}_${s.timestamp}_${s.side}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        dedupedSnapshots.push(s);
+      }
+    }
+
+    const markets = db.prepare(`
+      SELECT DISTINCT dm.market_id, dm.asset, dm.timeframe, dm.status, dm.fee_regime
+      FROM downloaded_markets dm
+      WHERE dm.download_id IN (${placeholders})
+    `).all(...ids);
+
+    const seenMarkets = new Set();
+    const dedupedMarkets = [];
+    for (const m of markets) {
+      if (!seenMarkets.has(m.market_id)) {
+        seenMarkets.add(m.market_id);
+        dedupedMarkets.push(m);
+      }
+    }
+
+    res.json({
+      snapshots: dedupedSnapshots.map(s => ({
+        market_id: s.market_id,
+        timestamp: s.timestamp,
+        side: s.side,
+        mid: s.mid,
+        last: s.last,
+        is_tradable: s.is_tradable
+      })),
+      markets: dedupedMarkets,
+      meta: {
+        asset,
+        start_time: startTime,
+        end_time: endTime,
+        total_snapshots: dedupedSnapshots.length,
+        total_markets: dedupedMarkets.length,
+        source_downloads: completedDownloads.length
+      }
+    });
+  } catch (error) {
+    console.error('Error analyzing range:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/:id/status', (req, res) => {
   try {
     const { id } = req.params;
