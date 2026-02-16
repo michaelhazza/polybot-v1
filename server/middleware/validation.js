@@ -28,10 +28,10 @@ export const schemas = {
       }),
 
     period: Joi.string()
-      .valid('30d', '60d', '3m', '6m')
+      .valid('7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m')
       .required()
       .messages({
-        'any.only': 'Period must be one of: 30d, 60d, 3m, 6m',
+        'any.only': 'Period must be one of: 7d, 30d, 60d, 3m, 6m, 12m, 24m, 36m',
         'any.required': 'Period is required'
       }),
 
