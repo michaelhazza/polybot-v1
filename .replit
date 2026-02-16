@@ -46,3 +46,10 @@ externalPort = 3000
 deploymentTarget = "autoscale"
 run = ["bash", "-c", "PORT=5000 node server/index.js"]
 build = ["bash", "-c", "npm run build && node server/database/init.js"]
+
+[userenv]
+
+[userenv.shared]
+USE_BITQUERY = "true"
+BITQUERY_STREAMING_ENDPOINT = "https://streaming.bitquery.io/graphql"
+BITQUERY_STANDARD_ENDPOINT = "https://graphql.bitquery.io/"
