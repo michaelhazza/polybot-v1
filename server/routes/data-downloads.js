@@ -43,8 +43,21 @@ router.post('/', async (req, res) => {
   try {
     const { asset, period } = req.body;
 
+    // Validate required fields
     if (!asset || !period) {
       return res.status(400).json({ error: 'Missing required fields: asset, period' });
+    }
+
+    // Validate asset
+    const validAssets = ['BTC', 'ETH', 'SOL'];
+    if (!validAssets.includes(asset)) {
+      return res.status(400).json({ error: `Invalid asset. Must be one of: ${validAssets.join(', ')}` });
+    }
+
+    // Validate period
+    const validPeriods = ['7d', '30d', '60d', '3m', '6m', '12m', '24m', '36m'];
+    if (!validPeriods.includes(period)) {
+      return res.status(400).json({ error: `Invalid period. Must be one of: ${validPeriods.join(', ')}` });
     }
 
     const existing = db.prepare(`
@@ -344,12 +357,16 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
       const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime);
 
       if (markets.length === 0) {
-        console.warn(`No markets found for ${asset}, falling back to synthetic data`);
+        console.warn(`[DataDownload] No markets found for ${asset}`);
+        console.warn(`[DataDownload] This may be due to Bitquery quota limits or no matching markets`);
+        console.warn(`[DataDownload] Falling back to synthetic data`);
+
+        updateProgress(5, 'No real data available, using synthetic data...');
         await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
         return;
       }
 
-      // Save market metadata
+      // Save market metadata (wrapped in transaction for atomicity)
       updateProgress(10, 'Saving market metadata...');
       const insertMarket = db.prepare(`
         INSERT OR IGNORE INTO downloaded_markets
@@ -357,11 +374,21 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
-      for (const market of markets) {
-        insertMarket.run(
-          downloadId, market.market_id, market.asset, market.timeframe,
-          market.start_time, market.end_time, market.status, market.fee_regime
-        );
+      const saveMarkets = db.transaction((marketList) => {
+        for (const market of marketList) {
+          insertMarket.run(
+            downloadId, market.market_id, market.asset, market.timeframe,
+            market.start_time, market.end_time, market.status, market.fee_regime
+          );
+        }
+      });
+
+      try {
+        saveMarkets(markets);
+        console.log(`[DataDownload] Saved ${markets.length} markets for download ${downloadId}`);
+      } catch (error) {
+        console.error(`[DataDownload] Error saving markets:`, error.message);
+        throw new Error(`Failed to save market metadata: ${error.message}`);
       }
 
       // Fetch snapshots for each market
@@ -399,16 +426,44 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         );
 
         if (snapshots.length > 0) {
-          const transaction = db.transaction(() => {
-            for (const snapshot of snapshots) {
-              insertSnapshot.run(
-                downloadId, snapshot.market_id, snapshot.timestamp,
-                snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
-              );
+          // Validate snapshots before insertion
+          const validSnapshots = snapshots.filter(s => {
+            if (!s.market_id || !s.timestamp || !s.side) {
+              console.warn('[DataDownload] Invalid snapshot: missing required fields');
+              return false;
             }
+            if (typeof s.mid !== 'number' || typeof s.last !== 'number') {
+              console.warn('[DataDownload] Invalid snapshot: prices must be numbers');
+              return false;
+            }
+            if (s.mid < 0 || s.mid > 1 || s.last < 0 || s.last > 1) {
+              console.warn('[DataDownload] Invalid snapshot: prices out of range [0,1]');
+              return false;
+            }
+            return true;
           });
-          transaction();
-          totalSnapshots += snapshots.length;
+
+          if (validSnapshots.length > 0) {
+            const transaction = db.transaction(() => {
+              for (const snapshot of validSnapshots) {
+                insertSnapshot.run(
+                  downloadId, snapshot.market_id, snapshot.timestamp,
+                  snapshot.side, snapshot.mid, snapshot.last, snapshot.is_tradable
+                );
+              }
+            });
+            try {
+              transaction();
+              totalSnapshots += validSnapshots.length;
+            } catch (error) {
+              console.error(`[DataDownload] Error inserting snapshots for market ${market.market_id}:`, error.message);
+              // Continue with next market instead of failing entirely
+            }
+          }
+
+          if (validSnapshots.length < snapshots.length) {
+            console.warn(`[DataDownload] Filtered out ${snapshots.length - validSnapshots.length} invalid snapshots`);
+          }
         }
 
         // Small delay to avoid rate limiting

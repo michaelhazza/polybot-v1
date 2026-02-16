@@ -67,6 +67,14 @@ class PolymarketClient {
         _trades: m._trades || [],
       }));
     } catch (error) {
+      // Special handling for quota errors
+      if (error.code === 'QUOTA_EXCEEDED') {
+        console.warn('[PolymarketClient] Bitquery quota exceeded.');
+        console.warn('[PolymarketClient] Cannot fetch markets. Please wait for quota reset or use synthetic data.');
+        // Return empty array for quota errors - caller should handle fallback
+        return [];
+      }
+
       console.error('[PolymarketClient] Error fetching markets via Bitquery:', error.message);
       console.error('[PolymarketClient] Falling back to empty result');
       return [];
@@ -149,11 +157,19 @@ class PolymarketClient {
 
       if (trades.length === 0) {
         console.log(`[PolymarketClient] No pre-loaded trades, fetching from API...`);
-        const startDate = new Date(startTime * 1000).toISOString();
-        const endDate = new Date(endTime * 1000).toISOString();
-        const fetched = await bitqueryClient.queryAllPolymarketTrades(startDate, endDate, 10000);
-        const filtered = fetched.filter(t => t.Trade?.Currency?.SmartContract === market.market_id);
-        trades.push(...filtered);
+        try {
+          const startDate = new Date(startTime * 1000).toISOString();
+          const endDate = new Date(endTime * 1000).toISOString();
+          const fetched = await bitqueryClient.queryAllPolymarketTrades(startDate, endDate, 10000);
+          const filtered = fetched.filter(t => t.Trade?.Currency?.SmartContract === market.market_id);
+          trades.push(...filtered);
+        } catch (error) {
+          if (error.code === 'QUOTA_EXCEEDED') {
+            console.warn(`[PolymarketClient] Bitquery quota exceeded. Cannot fetch trades for ${market.market_id}`);
+            return [];
+          }
+          throw error;
+        }
       }
 
       console.log(`[PolymarketClient] Processing ${trades.length} trades for ${market.market_id}`);
