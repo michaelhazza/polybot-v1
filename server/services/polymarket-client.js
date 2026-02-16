@@ -58,9 +58,9 @@ class PolymarketClient {
         question: m.question,
         asset,
         timeframe,
-        start_time: Math.floor(new Date(m.startDate).getTime() / 1000),
+        start_time: Math.floor(new Date(m.startDate).getTime() / 1000) || startTime,
         end_time: endTime,
-        status: m.metadata?.status || 'active',
+        status: m.closed ? 'closed' : (m.metadata?.status || 'active'),
         fee_regime: 'fee_free',
         clob_token_ids: m.clobTokenIds || ['0', '1'],
         token_mapping: m.metadata?.is_up_down ? { '0': 'UP', '1': 'DOWN' } : { '0': 'YES', '1': 'NO' },
@@ -140,12 +140,18 @@ class PolymarketClient {
   }
 
   async fetchSnapshots(market, startTime, endTime) {
-    // Use Bitquery if enabled, otherwise fall back to Polymarket API
-    if (this.useBitquery) {
-      return this._fetchSnapshotsBitquery(market, startTime, endTime);
-    } else {
-      return this._fetchSnapshotsPolymarketAPI(market, startTime, endTime);
+    const clobSnapshots = await this._fetchSnapshotsPolymarketAPI(market, startTime, endTime);
+    if (clobSnapshots.length > 0) {
+      console.log(`[PolymarketClient] Got ${clobSnapshots.length} snapshots from CLOB API for ${market.market_id}`);
+      return clobSnapshots;
     }
+
+    if (this.useBitquery) {
+      console.log(`[PolymarketClient] CLOB API returned no data, trying Bitquery for ${market.market_id}`);
+      return this._fetchSnapshotsBitquery(market, startTime, endTime);
+    }
+
+    return [];
   }
 
   async _fetchSnapshotsBitquery(market, startTime, endTime) {
@@ -287,26 +293,44 @@ class PolymarketClient {
         return [];
       }
 
+      const isClosed = market.status === 'closed' || market.status === 'resolved';
       const allSnapshots = [];
 
       for (let i = 0; i < tokenIds.length; i++) {
         const tokenId = tokenIds[i];
         const side = i === 0 ? 'YES' : 'NO';
 
-        const response = await this.client.get(`${POLYMARKET_API_BASE}/prices-history`, {
-          params: {
-            market: tokenId,
-            interval: 'max',
-            fidelity: 5
-          }
-        });
+        let data = [];
+        const fidelities = isClosed ? [720, 60, 5] : [60, 5];
 
-        const data = response.data?.history || [];
-        console.log(`  Token ${side} (${tokenId.substring(0, 20)}...): ${data.length} price points`);
+        for (const fidelity of fidelities) {
+          try {
+            const response = await this.client.get(`${POLYMARKET_API_BASE}/prices-history`, {
+              params: {
+                market: tokenId,
+                interval: 'max',
+                fidelity
+              }
+            });
+            data = response.data?.history || [];
+            if (data.length > 0) {
+              console.log(`  Token ${side} (${tokenId.substring(0, 20)}...): ${data.length} points (fidelity=${fidelity})`);
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+
+        if (data.length === 0) {
+          continue;
+        }
+
+        const filtered = data.filter(p => p.t >= startTime && p.t <= endTime);
 
         const BUCKET_SIZE = this._getSnapshotIntervalSeconds();
         const isTradeLevel = BUCKET_SIZE === 0;
-        for (const point of data) {
+        for (const point of filtered) {
           const rawTimestamp = point.t;
           const timestamp = isTradeLevel ? rawTimestamp : Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
           const price = typeof point.p === 'string' ? parseFloat(point.p) : point.p;
@@ -322,7 +346,7 @@ class PolymarketClient {
           }
         }
 
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
       return allSnapshots;

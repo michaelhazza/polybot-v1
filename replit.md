@@ -8,10 +8,10 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - **Backend**: Express.js API (port 3001 in dev, port 5000 in production)
 - **Database**: SQLite via better-sqlite3, stored at `data/polymarket.db`
 - **Build**: Vite builds to `dist/`
-- **Data Sources**: Dual-source architecture (real data only, no synthetic fallback)
+- **Data Sources**: Hybrid architecture (real data only, no synthetic fallback)
   - **Polymarket Gamma API**: Market discovery (has human-readable market names/questions)
-  - **Bitquery V2 GraphQL**: Historical trade data via DEXTradeByTokens on Polygon (blockchain records)
-  - **Polymarket CLOB API**: Alternative price history source (not currently active)
+  - **Polymarket CLOB API**: Primary price history source (free, ~30 day retention for active markets, tries multiple fidelities for closed markets)
+  - **Bitquery V2 GraphQL**: Fallback for recent data (Feb 2026+) via DEXTradeByTokens on Polygon
 
 ## Key Directories
 - `src/` - React frontend components
@@ -31,25 +31,29 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - Target: autoscale
 
 ## Data Flow
-- **Market Discovery**: Gamma API finds markets by asset keyword (e.g., "BTC"), returns CLOB token IDs
-- **Trade Data**: Bitquery DEXTradeByTokens fetches historical trades from Polygon blockchain
+- **Market Discovery**: Gamma API finds markets by asset keyword (e.g., "BTC"), returns CLOB token IDs (capped at 3000 per batch for performance)
+- **Price Data (Hybrid)**: CLOB API tried first (free, no credits needed), Bitquery as fallback for recent data
+- **CLOB API**: Tries multiple fidelity values (720min, 60min, 5min) for closed markets, filters to requested time range
 - **Token Mapping**: On-chain tokens lack human-readable names; Gamma API provides the mapping between token IDs and market questions
-- **Snapshot Processing**: Trades bucketed into 5-minute intervals, YES/NO sides determined by token ID matching
-- **Deduplication**: Before Bitquery API calls, checks existing DB coverage per market; skips API for markets already downloaded, copies cached data instead
+- **Snapshot Processing**: Trades bucketed into configurable intervals, YES/NO sides determined by token ID matching
+- **Deduplication**: Before API calls, checks existing DB coverage per market; skips API for markets already downloaded, copies cached data instead
 - Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time
 - Stop/Resume: Downloads can be stopped mid-progress and resumed later
 - Clear Data: Users can clear downloaded data for specific asset/period combinations
 
-## Bitquery Integration (V2 Schema)
+## Bitquery Integration (V2 Schema) - Fallback Only
 - **Endpoint**: `https://streaming.bitquery.io/graphql`
 - **Auth**: OAuth token (Bearer prefix auto-added by client)
+- **Role**: Fallback data source when CLOB API returns no data
+- **Limitation**: Polymarket data only available from ~Feb 2026 onward
 - **V2 Schema Notes**:
   - Uses `is` instead of `eq` for Name filters
-  - Requires `dataset: combined` parameter
+  - Never use `dataset: combined` (causes timeouts)
   - Uses `DateTime` type for time variables
   - `Block.Time` (ISO string) instead of `Block.Timestamp`
   - Trade IDs in `Trade.Ids` array for token identification
 - **Rate Limiting**: API has points-based quota; heavy testing can hit 402 errors
+- **Credit Protection**: Market discovery no longer sends Bitquery queries (uses CLOB API for snapshots instead)
 
 ## UI Components
 - ConfirmDialog: Reusable modal dialog for confirmations (replaces browser confirm())
@@ -57,6 +61,11 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- **Hybrid data pipeline (CLOB primary, Bitquery fallback)**: CLOB API tried first for all markets (free, no credits). Falls back to Bitquery only when CLOB returns no data. Saves Bitquery credits.
+- **Skipped Bitquery during market discovery**: Market finder no longer sends Bitquery queries to fetch trades. Markets returned from Gamma with empty trades, CLOB API provides snapshot data during download phase.
+- **Optimized Gamma API pagination**: Capped at 30 pages (3000 markets) per batch instead of 100 pages (10K). Reduces discovery time significantly.
+- **CLOB API multi-fidelity**: For closed markets, tries fidelity 720 (12hr), 60 (1hr), 5 (5min). For active markets, tries 60, 5. Returns first successful result.
+- **CLOB API time filtering**: Filters returned data to requested start/end time range before processing.
 - **Fixed Bitquery API timeout**: Removed `dataset: combined` from all GraphQL queries - this parameter caused the Bitquery V2 API to timeout/return empty. Without it, queries respond instantly with real trade data.
 - **Improved Gamma market filtering**: Added creation date filter to exclude very old markets (>2 years before query start). Prevents 2020-era markets from being included.
 - **Future date validation**: Download endpoint now clamps end dates to current time and rejects invalid date ranges.
