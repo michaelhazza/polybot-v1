@@ -10,6 +10,7 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - Conservative trade simulation
 - Comprehensive metrics dashboard
 - Run comparison and debugging tools
+- **NEW:** Bitquery blockchain integration for granular on-chain data
 
 ## Setup
 
@@ -28,7 +29,13 @@ npm run db:init
 cp .env.example .env
 ```
 
-4. Run development server:
+4. Configure Bitquery (optional):
+   - Sign up at https://ide.bitquery.io/
+   - Get your OAuth token from Account → Profile → API Keys
+   - Add to `.env`: `BITQUERY_OAUTH_TOKEN=Bearer your-token-here`
+   - See [BITQUERY_INTEGRATION.md](./BITQUERY_INTEGRATION.md) for details
+
+5. Run development server:
 ```bash
 npm run dev
 ```
@@ -43,6 +50,25 @@ npm run dev
 - `GET /api/backtests/:id/export/trades.csv` - Export trades
 - `GET /api/backtests/:id/debug/top-windows` - Debug window data
 
+## Data Sources
+
+### Bitquery Integration (Recommended)
+
+The system now supports Bitquery for accessing Polymarket data directly from the blockchain:
+
+- **Benefits:** More granular data, full historical access, no API limitations
+- **Setup:** See [BITQUERY_INTEGRATION.md](./BITQUERY_INTEGRATION.md)
+- **Testing:** Run `node test-bitquery.js` to verify integration
+- **Toggle:** Set `USE_BITQUERY=true` in `.env` (default)
+
+### Polymarket API (Legacy)
+
+Original data source using Polymarket's REST API:
+
+- **Benefits:** Simple setup, no account required
+- **Limitations:** Rate limits, limited historical data
+- **Toggle:** Set `USE_BITQUERY=false` in `.env`
+
 ## Go/No-Go Metrics
 
 1. **windows_per_analysis_hour** ≥ 0.1
@@ -50,3 +76,19 @@ npm run dev
 3. **fill_success_rate** ≥ 20%
 4. **avg_execution_adjusted_edge** ≥ 0.5%
 5. **data_coverage_pct** ≥ 90%
+
+## Testing
+
+### Bitquery Integration Test
+
+```bash
+node test-bitquery.js
+```
+
+Expected: All 5 tests should pass
+
+### Full System Test
+
+```bash
+npm run test
+```
