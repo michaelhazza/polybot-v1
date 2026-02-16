@@ -238,6 +238,16 @@ tr:hover {
   transition: width 0.3s;
 }
 
+.progress-fill-indeterminate {
+  width: 30%;
+  animation: indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
 .tabs {
   display: flex;
   gap: 0.5rem;

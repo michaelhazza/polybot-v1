@@ -215,7 +215,7 @@ function DataDownload() {
       <div className="card">
         <h2>Download Market Data</h2>
         <p style={{ color: '#94a3b8', marginBottom: '1.5rem' }}>
-          Download historical market data at 5-minute intervals. Data is saved and persists across sessions.
+          Download historical market data. Interval is configurable in Settings. Data is saved and persists across sessions.
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -263,11 +263,19 @@ function DataDownload() {
           <div className="progress-section" style={{ marginTop: '1.5rem' }}>
             <div className="progress-info">
               <span className="progress-stage">{stage}</span>
-              <span className="progress-percentage">{progress.toFixed(0)}%</span>
+              {progress >= 0 && (
+                <span className="progress-percentage">{progress.toFixed(0)}%</span>
+              )}
             </div>
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${progress}%` }} />
-            </div>
+            {progress >= 0 ? (
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${progress}%` }} />
+              </div>
+            ) : (
+              <div className="progress-bar">
+                <div className="progress-fill progress-fill-indeterminate" />
+              </div>
+            )}
           </div>
         )}
       </div>

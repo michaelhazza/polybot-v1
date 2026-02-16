@@ -352,8 +352,7 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
     const useLiveAPI = true; // Toggle to use live Polymarket API
 
     if (useLiveAPI) {
-      // Fetch real markets from Polymarket API
-      updateProgress(5, 'Fetching markets from Polymarket...');
+      updateProgress(-1, 'Pulling Polymarket data...');
       const markets = await polymarketClient.fetchMarkets(asset, '15min', startTime, endTime);
 
       if (markets.length === 0) {
@@ -361,13 +360,12 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
         console.warn(`[DataDownload] This may be due to Bitquery quota limits or no matching markets`);
         console.warn(`[DataDownload] Falling back to synthetic data`);
 
-        updateProgress(5, 'No real data available, using synthetic data...');
+        updateProgress(-1, 'No real data available, using synthetic data...');
         await processDataDownloadSynthetic(downloadId, asset, startTime, endTime);
         return;
       }
 
-      // Save market metadata (wrapped in transaction for atomicity)
-      updateProgress(10, 'Saving market metadata...');
+      updateProgress(-1, `Found ${markets.length} market(s), processing...`);
       const insertMarket = db.prepare(`
         INSERT OR IGNORE INTO downloaded_markets
         (download_id, market_id, asset, timeframe, start_time, end_time, status, fee_regime)
@@ -415,8 +413,8 @@ async function processDataDownload(downloadId, asset, startTime, endTime) {
 
         const marketLabel = market.question ? market.question.substring(0, 50) : market.market_id;
         updateProgress(
-          10 + (i * progressPerMarket),
-          `Fetching data for market ${i + 1}/${markets.length}: ${marketLabel}...`
+          -1,
+          `Pulling data for market ${i + 1}/${markets.length}: ${marketLabel}...`
         );
 
         const snapshots = await polymarketClient.fetchSnapshots(
