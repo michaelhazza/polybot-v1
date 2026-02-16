@@ -1,21 +1,19 @@
 /**
- * Bitquery GraphQL Query Templates
+ * Bitquery V2 GraphQL Query Templates
  *
  * Centralized repository for all Bitquery GraphQL queries used in the application.
- * These queries access Polymarket data on Polygon (Matic) blockchain.
+ * These queries access Polymarket data on Polygon (Matic) blockchain via V2 Streaming API.
+ *
+ * V2 Schema Notes:
+ * - dataset parameter required (combined, realtime, archive)
+ * - DateTime type for time variables
+ * - Name filter uses { is: } instead of { eq: }
  *
  * Contract Addresses:
  * - CTF Exchange (OrderFilled events): 0xC5d563A36AE78145C45a50134d48A1215220f80a
  * - Conditional Tokens (ConditionPreparation): 0x4d97dcd97ec945f40cf65f87097ace5ea0476045
- * - UMA Oracle (QuestionInitialized): Various addresses
  */
 
-/**
- * Query OrderFilled events for price discovery
- *
- * Returns all trade executions for a specific condition (market).
- * Used to calculate market prices from actual trades.
- */
 export const ORDER_FILLED_QUERY = `
   query OrderFilledEvents(
     $conditionId: String!
@@ -23,17 +21,17 @@ export const ORDER_FILLED_QUERY = `
     $endTime: DateTime
     $limit: Int!
   ) {
-    EVM(network: matic) {
+    EVM(dataset: combined, network: matic) {
       Events(
         where: {
           Block: { Time: { since: $startTime, till: $endTime } }
-          Log: { Signature: { Name: { eq: "OrderFilled" } } }
+          Log: { Signature: { Name: { is: "OrderFilled" } } }
           LogHeader: {
-            Address: { in: ["0xC5d563A36AE78145C45a50134d48A1215220f80a"] }
+            Address: { is: "0xC5d563A36AE78145C45a50134d48A1215220f80a" }
           }
           Arguments: {
             includes: [
-              { Name: { eq: "conditionId" }, Value: { Address: { is: $conditionId } } }
+              { Name: { is: "conditionId" }, Value: { Address: { is: $conditionId } } }
             ]
           }
         }
@@ -42,7 +40,6 @@ export const ORDER_FILLED_QUERY = `
       ) {
         Block {
           Time
-          Timestamp
           Number
         }
         Transaction {
@@ -72,23 +69,17 @@ export const ORDER_FILLED_QUERY = `
   }
 `;
 
-/**
- * Query ConditionPreparation events for market discovery
- *
- * Returns all new market conditions created on Polymarket.
- * Used to discover new markets and their condition IDs.
- */
 export const CONDITION_PREPARATION_QUERY = `
   query ConditionPreparationEvents(
     $startTime: DateTime
     $endTime: DateTime
     $limit: Int!
   ) {
-    EVM(network: matic) {
+    EVM(dataset: combined, network: matic) {
       Events(
         where: {
           Block: { Time: { since: $startTime, till: $endTime } }
-          Log: { Signature: { Name: { eq: "ConditionPreparation" } } }
+          Log: { Signature: { Name: { is: "ConditionPreparation" } } }
           LogHeader: {
             Address: { is: "0x4d97dcd97ec945f40cf65f87097ace5ea0476045" }
           }
@@ -98,7 +89,6 @@ export const CONDITION_PREPARATION_QUERY = `
       ) {
         Block {
           Time
-          Timestamp
           Number
         }
         Transaction {
@@ -126,23 +116,17 @@ export const CONDITION_PREPARATION_QUERY = `
   }
 `;
 
-/**
- * Query QuestionInitialized events for market metadata
- *
- * Returns market questions and metadata from UMA oracle.
- * Used to filter for Bitcoin-related markets.
- */
 export const QUESTION_INITIALIZED_QUERY = `
   query QuestionInitializedEvents(
     $startTime: DateTime
     $endTime: DateTime
     $limit: Int!
   ) {
-    EVM(network: matic) {
+    EVM(dataset: combined, network: matic) {
       Events(
         where: {
           Block: { Time: { since: $startTime, till: $endTime } }
-          Log: { Signature: { Name: { eq: "QuestionInitialized" } } }
+          Log: { Signature: { Name: { is: "QuestionInitialized" } } }
           LogHeader: {
             Address: { is: "0x4d97dcd97ec945f40cf65f87097ace5ea0476045" }
           }
@@ -152,7 +136,6 @@ export const QUESTION_INITIALIZED_QUERY = `
       ) {
         Block {
           Time
-          Timestamp
           Number
         }
         Transaction {
@@ -176,9 +159,6 @@ export const QUESTION_INITIALIZED_QUERY = `
             ... on EVM_ABI_String_Value_Arg {
               string
             }
-            ... on EVM_ABI_Bytes_Value_Arg {
-              hex
-            }
           }
         }
       }
@@ -186,12 +166,6 @@ export const QUESTION_INITIALIZED_QUERY = `
   }
 `;
 
-/**
- * Query PositionSplit events for token creation
- *
- * Returns all position splits (token creations) for a condition.
- * Used to identify UP/DOWN token IDs.
- */
 export const POSITION_SPLIT_QUERY = `
   query PositionSplitEvents(
     $conditionId: String!
@@ -199,17 +173,17 @@ export const POSITION_SPLIT_QUERY = `
     $endTime: DateTime
     $limit: Int!
   ) {
-    EVM(network: matic) {
+    EVM(dataset: combined, network: matic) {
       Events(
         where: {
           Block: { Time: { since: $startTime, till: $endTime } }
-          Log: { Signature: { Name: { eq: "PositionSplit" } } }
+          Log: { Signature: { Name: { is: "PositionSplit" } } }
           LogHeader: {
             Address: { is: "0x4d97dcd97ec945f40cf65f87097ace5ea0476045" }
           }
           Arguments: {
             includes: [
-              { Name: { eq: "conditionId" }, Value: { Address: { is: $conditionId } } }
+              { Name: { is: "conditionId" }, Value: { Address: { is: $conditionId } } }
             ]
           }
         }
@@ -218,7 +192,6 @@ export const POSITION_SPLIT_QUERY = `
       ) {
         Block {
           Time
-          Timestamp
           Number
         }
         Transaction {
@@ -246,24 +219,6 @@ export const POSITION_SPLIT_QUERY = `
   }
 `;
 
-/**
- * Query user points balance
- */
-export const USER_POINTS_QUERY = `
-  query UserPoints {
-    user {
-      points
-      email
-    }
-  }
-`;
-
-/**
- * Streaming subscription for real-time OrderFilled events
- *
- * Use this with Bitquery's streaming endpoint for real-time data.
- * NOTE: Subscriptions consume more points than regular queries.
- */
 export const ORDER_FILLED_SUBSCRIPTION = `
   subscription OrderFilledStream(
     $conditionId: String!
@@ -271,20 +226,19 @@ export const ORDER_FILLED_SUBSCRIPTION = `
     EVM(network: matic, trigger_on: head) {
       Events(
         where: {
-          Log: { Signature: { Name: { eq: "OrderFilled" } } }
+          Log: { Signature: { Name: { is: "OrderFilled" } } }
           LogHeader: {
-            Address: { in: ["0xC5d563A36AE78145C45a50134d48A1215220f80a"] }
+            Address: { is: "0xC5d563A36AE78145C45a50134d48A1215220f80a" }
           }
           Arguments: {
             includes: [
-              { Name: { eq: "conditionId" }, Value: { Address: { is: $conditionId } } }
+              { Name: { is: "conditionId" }, Value: { Address: { is: $conditionId } } }
             ]
           }
         }
       ) {
         Block {
           Time
-          Timestamp
           Number
         }
         Transaction {
@@ -312,34 +266,18 @@ export const ORDER_FILLED_SUBSCRIPTION = `
   }
 `;
 
-/**
- * Query configuration defaults
- */
 export const QUERY_DEFAULTS = {
-  // Maximum events to fetch per query
   DEFAULT_LIMIT: 1000,
-
-  // Maximum pagination size
   MAX_LIMIT: 10000,
-
-  // Polymarket contract addresses
   CONTRACTS: {
     CTF_EXCHANGE: '0xC5d563A36AE78145C45a50134d48A1215220f80a',
     CONDITIONAL_TOKENS: '0x4d97dcd97ec945f40cf65f87097ace5ea0476045',
     USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
   },
-
-  // Network
   NETWORK: 'matic',
+  DATASET: 'combined',
 };
 
-/**
- * Helper to build time range variables
- *
- * @param {Date} startDate - Start date
- * @param {Date} endDate - End date
- * @returns {object} Time range variables for Bitquery
- */
 export function buildTimeRange(startDate, endDate) {
   return {
     startTime: startDate.toISOString(),
@@ -347,12 +285,6 @@ export function buildTimeRange(startDate, endDate) {
   };
 }
 
-/**
- * Helper to parse OrderFilled event arguments
- *
- * @param {Array} args - Event arguments from Bitquery
- * @returns {object} Parsed event data
- */
 export function parseOrderFilledArgs(args) {
   const parsed = {};
 
@@ -379,7 +311,6 @@ export default {
   CONDITION_PREPARATION_QUERY,
   QUESTION_INITIALIZED_QUERY,
   POSITION_SPLIT_QUERY,
-  USER_POINTS_QUERY,
   ORDER_FILLED_SUBSCRIPTION,
   QUERY_DEFAULTS,
   buildTimeRange,

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import bitqueryClient from '../../lib/bitquery-client.js';
 import { discoverMarketsByAsset, batchDiscoverMarkets } from '../../lib/polymarket-market-finder.js';
-import { aggregateOrderFilledEvents, createTokenMapping } from '../../lib/data-mappers.js';
+import { createTokenMapping } from '../../lib/data-mappers.js';
 
 const POLYMARKET_API_BASE = process.env.POLYMARKET_API_BASE || 'https://clob.polymarket.com';
 const GAMMA_API_BASE = 'https://gamma-api.polymarket.com';
@@ -53,7 +53,6 @@ class PolymarketClient {
 
       console.log(`[PolymarketClient] Found ${markets.length} markets via Bitquery`);
 
-      // Transform to expected format
       return markets.map(m => ({
         market_id: m.market_id,
         question: m.question,
@@ -64,7 +63,8 @@ class PolymarketClient {
         status: m.metadata?.status || 'active',
         fee_regime: 'fee_free',
         clob_token_ids: m.clobTokenIds || ['0', '1'],
-        token_mapping: m.metadata?.is_up_down ? { '0': 'UP', '1': 'DOWN' } : { '0': 'YES', '1': 'NO' }
+        token_mapping: m.metadata?.is_up_down ? { '0': 'UP', '1': 'DOWN' } : { '0': 'YES', '1': 'NO' },
+        _trades: m._trades || [],
       }));
     } catch (error) {
       console.error('[PolymarketClient] Error fetching markets via Bitquery:', error.message);
@@ -145,33 +145,97 @@ class PolymarketClient {
     try {
       console.log(`[PolymarketClient] Fetching snapshots for ${market.market_id} via Bitquery...`);
 
-      const startDate = new Date(startTime * 1000).toISOString();
-      const endDate = new Date(endTime * 1000).toISOString();
+      const trades = market._trades || [];
 
-      // Fetch OrderFilled events
-      const events = await bitqueryClient.queryOrderFilledEvents(
-        market.market_id,
-        startDate,
-        endDate,
-        10000 // Max events to fetch
-      );
+      if (trades.length === 0) {
+        console.log(`[PolymarketClient] No pre-loaded trades, fetching from API...`);
+        const startDate = new Date(startTime * 1000).toISOString();
+        const endDate = new Date(endTime * 1000).toISOString();
+        const fetched = await bitqueryClient.queryAllPolymarketTrades(startDate, endDate, 10000);
+        const filtered = fetched.filter(t => t.Trade?.Currency?.SmartContract === market.market_id);
+        trades.push(...filtered);
+      }
 
-      console.log(`[PolymarketClient] Found ${events.length} OrderFilled events`);
+      console.log(`[PolymarketClient] Processing ${trades.length} trades for ${market.market_id}`);
 
-      if (events.length === 0) {
-        console.warn(`[PolymarketClient] No OrderFilled events found for market ${market.market_id}`);
+      if (trades.length === 0) {
+        console.warn(`[PolymarketClient] No trades found for market ${market.market_id}`);
         return [];
       }
 
-      // Create token mapping from market metadata
-      const tokenMapping = market.token_mapping || createTokenMapping(market.market_id, market.question || '');
+      const BUCKET_SIZE = 300;
+      const snapshots = [];
 
-      // Transform events to snapshots
-      const snapshots = aggregateOrderFilledEvents(events, market.market_id, tokenMapping);
+      const clobTokenIds = market.clob_token_ids || [];
+      const firstTokenId = clobTokenIds[0];
+      const secondTokenId = clobTokenIds[1];
 
-      console.log(`[PolymarketClient] Transformed to ${snapshots.length} snapshots`);
+      for (const trade of trades) {
+        const blockTime = trade.Block?.Time;
+        if (!blockTime) continue;
 
-      return snapshots;
+        const rawTimestamp = Math.floor(new Date(blockTime).getTime() / 1000);
+        const timestamp = Math.round(rawTimestamp / BUCKET_SIZE) * BUCKET_SIZE;
+
+        const price = parseFloat(trade.Trade?.PriceInUSD) || 0;
+        const tradeIds = trade.Trade?.Ids || [];
+        const sideType = trade.Trade?.Side?.Type || 'buy';
+
+        if (price <= 0 || price > 1) continue;
+
+        let side = 'YES';
+        if (tradeIds.length > 0 && secondTokenId && tradeIds.includes(secondTokenId)) {
+          side = 'NO';
+        } else if (sideType === 'sell') {
+          side = 'NO';
+        }
+
+        snapshots.push({
+          market_id: market.market_id,
+          timestamp,
+          side,
+          mid: price,
+          last: price,
+          is_tradable: 1,
+        });
+
+        const complementPrice = 1 - price;
+        if (complementPrice > 0 && complementPrice < 1) {
+          snapshots.push({
+            market_id: market.market_id,
+            timestamp,
+            side: side === 'YES' ? 'NO' : 'YES',
+            mid: complementPrice,
+            last: complementPrice,
+            is_tradable: 1,
+          });
+        }
+      }
+
+      const buckets = new Map();
+      for (const snap of snapshots) {
+        const key = `${snap.timestamp}_${snap.side}`;
+        if (!buckets.has(key)) {
+          buckets.set(key, { ...snap, prices: [snap.mid] });
+        } else {
+          buckets.get(key).prices.push(snap.mid);
+        }
+      }
+
+      const aggregated = Array.from(buckets.values()).map(b => ({
+        market_id: b.market_id,
+        timestamp: b.timestamp,
+        side: b.side,
+        mid: b.prices.reduce((s, p) => s + p, 0) / b.prices.length,
+        last: b.prices[b.prices.length - 1],
+        is_tradable: b.is_tradable,
+      }));
+
+      aggregated.sort((a, b) => a.timestamp - b.timestamp);
+
+      console.log(`[PolymarketClient] Transformed to ${aggregated.length} snapshots`);
+
+      return aggregated;
     } catch (error) {
       console.error(`[PolymarketClient] Error fetching snapshots via Bitquery for ${market.market_id}:`, error.message);
       return [];

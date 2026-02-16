@@ -8,11 +8,17 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - **Backend**: Express.js API (port 3001 in dev, port 5000 in production)
 - **Database**: SQLite via better-sqlite3, stored at `data/polymarket.db`
 - **Build**: Vite builds to `dist/`
-- **Live API**: Polymarket Gamma API (markets) + CLOB API (price history), with synthetic data fallback
+- **Data Sources**: Dual-source architecture
+  - **Polymarket Gamma API**: Market discovery (has human-readable market names/questions)
+  - **Bitquery V2 GraphQL**: Historical trade data via DEXTradeByTokens on Polygon (blockchain records)
+  - **Polymarket CLOB API**: Alternative price history source (not currently active)
+  - **Synthetic fallback**: Auto-generated data when no live markets found
 
 ## Key Directories
 - `src/` - React frontend components
 - `server/` - Express backend (routes, services, middleware, database)
+- `lib/` - Shared libraries (Bitquery client, market finder, data mappers)
+- `config/` - Configuration files (Bitquery GraphQL queries)
 - `data/` - SQLite database files (gitignored)
 
 ## Development
@@ -26,12 +32,25 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - Target: autoscale
 
 ## Data Flow
-- Data Download: Fetches real markets from Polymarket Gamma API, then price history from CLOB API at 5-minute granularity
-- Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time to aggregate from granular data
-- Synthetic fallback: Automatically generates synthetic data when no live markets found for an asset
+- **Market Discovery**: Gamma API finds markets by asset keyword (e.g., "BTC"), returns CLOB token IDs
+- **Trade Data**: Bitquery DEXTradeByTokens fetches historical trades from Polygon blockchain
+- **Token Mapping**: On-chain tokens lack human-readable names; Gamma API provides the mapping between token IDs and market questions
+- **Snapshot Processing**: Trades bucketed into 5-minute intervals, YES/NO sides determined by token ID matching
+- Backtesting: Uses downloaded data; timeframe (5min/15min/1hr) selected at backtest time
+- Synthetic fallback: Automatically generates synthetic data when no live markets found
 - Stop/Resume: Downloads can be stopped mid-progress and resumed later
 - Clear Data: Users can clear downloaded data for specific asset/period combinations
-- Rate limiting: 100ms delays between API calls to avoid throttling
+
+## Bitquery Integration (V2 Schema)
+- **Endpoint**: `https://streaming.bitquery.io/graphql`
+- **Auth**: OAuth token (Bearer prefix auto-added by client)
+- **V2 Schema Notes**:
+  - Uses `is` instead of `eq` for Name filters
+  - Requires `dataset: combined` parameter
+  - Uses `DateTime` type for time variables
+  - `Block.Time` (ISO string) instead of `Block.Timestamp`
+  - Trade IDs in `Trade.Ids` array for token identification
+- **Rate Limiting**: API has points-based quota; heavy testing can hit 402 errors
 
 ## UI Components
 - ConfirmDialog: Reusable modal dialog for confirmations (replaces browser confirm())
@@ -39,15 +58,13 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
-- Redesigned DataDownload to show saved downloads grouped by asset (Bitcoin, etc.) with expandable inspection
-- Added GET /api/data-downloads endpoint listing all downloads with market/snapshot counts
-- Downloads persist in SQLite across app restarts; click any completed download to expand and inspect
-- Expanded view shows Arbitrage View, Price Chart, and Raw Data tabs with per-market analysis
-- Fixed timestamp alignment: rounds to 5-minute buckets for perfect YES/NO pairing
-- Added reusable ConfirmDialog component for proper UI confirmations
-- Changed data fetching to 5-minute fidelity for granular price history
-- Integrated live Polymarket API (Gamma + CLOB) for real market data
-- Added smart fallback to synthetic data when no live markets found
-- Added stop/resume functionality for data downloads
+- Implemented hybrid data pipeline: Gamma API for market discovery + Bitquery for trade data
+- Migrated Bitquery integration from V1 to V2 streaming schema
+- Refactored from raw blockchain Events to efficient DEXTradeByTokens API
+- Auto-prefixes "Bearer " to Bitquery OAuth token in bitquery-client.js
+- Updated all GraphQL queries for V2: `is` filters, `dataset: combined`, `DateTime` types
+- Token ID matching: maps on-chain trade Ids to YES/NO outcomes via Gamma CLOB token IDs
+- Redesigned DataDownload with expandable inspection (Arbitrage View, Price Chart, Raw Data)
+- Added stop/resume functionality and clear data for downloads
 - Configured Vite for Replit (port 5000, host 0.0.0.0, allowedHosts)
-- Database files excluded from git (too large for GitHub)
+- Database files excluded from git
