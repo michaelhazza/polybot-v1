@@ -160,9 +160,22 @@ class PolymarketClient {
         try {
           const startDate = new Date(startTime * 1000).toISOString();
           const endDate = new Date(endTime * 1000).toISOString();
-          const fetched = await bitqueryClient.queryAllPolymarketTrades(startDate, endDate, 10000);
-          const filtered = fetched.filter(t => t.Trade?.Currency?.SmartContract === market.market_id);
-          trades.push(...filtered);
+
+          // OPTIMIZATION: Use token-filtered query if token IDs are available
+          const tokenIds = market.clob_token_ids || [];
+          let fetched = [];
+
+          if (tokenIds.length > 0) {
+            console.log(`[PolymarketClient] Using optimized token-filtered query for ${tokenIds.length} tokens`);
+            fetched = await bitqueryClient.queryAllPolymarketTradesByTokens(startDate, endDate, tokenIds, 5000);
+          } else {
+            console.warn(`[PolymarketClient] No token IDs available, using expensive unfiltered query`);
+            fetched = await bitqueryClient.queryAllPolymarketTrades(startDate, endDate, 5000);
+            // Filter by market ID in JavaScript (fallback only)
+            fetched = fetched.filter(t => t.Trade?.Currency?.SmartContract === market.market_id);
+          }
+
+          trades.push(...fetched);
         } catch (error) {
           if (error.code === 'QUOTA_EXCEEDED') {
             console.warn(`[PolymarketClient] Bitquery quota exceeded. Cannot fetch trades for ${market.market_id}`);
