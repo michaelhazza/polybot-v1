@@ -58,6 +58,10 @@ Backtest management system for validating arbitrage opportunities in Polymarket 
 - BacktestConfigForm: Configure and run backtests with timeframe selection
 
 ## Recent Changes
+- **Gamma API now fetches both active AND closed/resolved markets** for historical coverage (12+ months)
+- Refactored market finder: Gamma markets fetched once, only Bitquery trade queries chunked by 7-day windows
+- Added period options: 7d, 30d, 60d, 3m, 6m, 12m, 24m, 36m
+- All date displays use Australian format (DD/MM/YYYY) via 'en-AU' locale
 - Implemented hybrid data pipeline: Gamma API for market discovery + Bitquery for trade data
 - Migrated Bitquery integration from V1 to V2 streaming schema
 - Refactored from raw blockchain Events to efficient DEXTradeByTokens API
