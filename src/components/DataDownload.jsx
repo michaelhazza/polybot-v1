@@ -532,7 +532,7 @@ function ArbitrageView({ marketData }) {
         const minC = Math.min(...combinedPrices);
         const maxC = Math.max(...combinedPrices);
         const avgC = combinedPrices.reduce((a, b) => a + b, 0) / combinedPrices.length;
-        const subOneCount = combinedPrices.filter(p => p < 1.0).length;
+        const subOneCount = combinedPrices.filter(p => p < 0.9999).length;
         const subOnePct = ((subOneCount / combinedPrices.length) * 100).toFixed(1);
         const chartMin = Math.min(minC, 0.95);
         const chartMax = Math.max(maxC, 1.05);
@@ -596,7 +596,7 @@ function ArbitrageView({ marketData }) {
               />
               {(() => {
                 const oneY = 180 - ((1.0 - chartMin) / chartRange) * 160;
-                return paired.filter(p => p.combined < 1.0).map((p, i) => {
+                return paired.filter(p => p.combined < 0.9999).map((p, i) => {
                   const idx2 = paired.indexOf(p);
                   const x = 50 + (idx2 / Math.max(paired.length - 1, 1)) * 710;
                   const y = 180 - ((p.combined - chartMin) / chartRange) * 160;
@@ -606,10 +606,10 @@ function ArbitrageView({ marketData }) {
             </svg>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', marginTop: '0.75rem' }}>
-              <div className="stat"><label>Min Combined:</label><span style={{ color: minC < 1.0 ? '#22c55e' : '#e2e8f0' }}>{minC.toFixed(4)}</span></div>
+              <div className="stat"><label>Min Combined:</label><span style={{ color: minC < 0.9999 ? '#22c55e' : '#e2e8f0' }}>{minC.toFixed(4)}</span></div>
               <div className="stat"><label>Max Combined:</label><span>{maxC.toFixed(4)}</span></div>
-              <div className="stat"><label>Avg Combined:</label><span style={{ color: avgC < 1.0 ? '#22c55e' : '#e2e8f0' }}>{avgC.toFixed(4)}</span></div>
-              <div className="stat"><label>Max Profit/Unit:</label><span style={{ color: minC < 1.0 ? '#22c55e' : '#64748b' }}>{minC < 1.0 ? `$${(1 - minC).toFixed(4)}` : 'None'}</span></div>
+              <div className="stat"><label>Avg Combined:</label><span style={{ color: avgC < 0.9999 ? '#22c55e' : '#e2e8f0' }}>{avgC.toFixed(4)}</span></div>
+              <div className="stat"><label>Max Profit/Unit:</label><span style={{ color: minC < 0.9999 ? '#22c55e' : '#64748b' }}>{minC < 0.9999 ? `$${(1 - minC).toFixed(4)}` : 'None'}</span></div>
             </div>
           </div>
         );
@@ -709,7 +709,7 @@ function RawDataView({ paired, marketData, selectedMarket, onSetMarket, onExport
           </thead>
           <tbody>
             {paired.slice(0, 200).map((row, i) => {
-              const isArb = row.combined < 1.0;
+              const isArb = row.combined < 0.9999;
               return (
                 <tr key={i} style={isArb ? { background: '#22c55e10' } : {}}>
                   <td>{new Date(row.timestamp * 1000).toLocaleString('en-AU')}</td>
