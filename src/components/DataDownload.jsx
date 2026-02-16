@@ -315,7 +315,7 @@ function AssetGroup({ asset, downloads, expandedId, expandedData, expandedTab, e
   if (completedDownloads.length > 0) {
     const earliest = Math.min(...completedDownloads.map(d => d.start_time));
     const latest = Math.max(...completedDownloads.map(d => d.end_time));
-    dateRange = `${new Date(earliest * 1000).toLocaleDateString()} - ${new Date(latest * 1000).toLocaleDateString()}`;
+    dateRange = `${new Date(earliest * 1000).toLocaleDateString('en-AU')} - ${new Date(latest * 1000).toLocaleDateString('en-AU')}`;
   }
 
   return (
@@ -362,8 +362,8 @@ function AssetGroup({ asset, downloads, expandedId, expandedData, expandedTab, e
 }
 
 function DownloadRow({ dl, isExpanded, expandedData, expandedTab, expandedMarket, loadingData, onExpand, onSetTab, onSetMarket, onExportCSV }) {
-  const startDate = new Date(dl.start_time * 1000).toLocaleDateString();
-  const endDate = new Date(dl.end_time * 1000).toLocaleDateString();
+  const startDate = new Date(dl.start_time * 1000).toLocaleDateString('en-AU');
+  const endDate = new Date(dl.end_time * 1000).toLocaleDateString('en-AU');
   const isClickable = dl.status === 'completed';
 
   const statusColors = {
@@ -508,7 +508,7 @@ function getDateTicks(paired, numTicks = 6) {
     const idx = Math.round((i / (numTicks - 1)) * (paired.length - 1));
     const ts = paired[idx].timestamp;
     const d = new Date(ts * 1000);
-    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    const label = d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: '2-digit' });
     ticks.push({ idx, label, frac: idx / (paired.length - 1) });
   }
   return ticks;
@@ -644,7 +644,7 @@ function ChartView({ marketData, paired, selectedMarket, onSetMarket, asset }) {
       </div>
       <div className="chart-info">
         <div className="stat"><label>Paired Points:</label><span>{paired.length.toLocaleString()}</span></div>
-        <div className="stat"><label>Time Range:</label><span>{new Date(paired[0].timestamp * 1000).toLocaleDateString()} - {new Date(paired[paired.length - 1].timestamp * 1000).toLocaleDateString()}</span></div>
+        <div className="stat"><label>Time Range:</label><span>{new Date(paired[0].timestamp * 1000).toLocaleDateString('en-AU')} - {new Date(paired[paired.length - 1].timestamp * 1000).toLocaleDateString('en-AU')}</span></div>
       </div>
       <svg className="price-chart" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid meet">
         <rect width="800" height="420" fill="#1e293b" />
@@ -712,7 +712,7 @@ function RawDataView({ paired, marketData, selectedMarket, onSetMarket, onExport
               const isArb = row.combined < 1.0;
               return (
                 <tr key={i} style={isArb ? { background: '#22c55e10' } : {}}>
-                  <td>{new Date(row.timestamp * 1000).toLocaleString()}</td>
+                  <td>{new Date(row.timestamp * 1000).toLocaleString('en-AU')}</td>
                   <td style={{ color: '#3b82f6' }}>{row.yes.toFixed(4)}</td>
                   <td style={{ color: '#ef4444' }}>{row.no.toFixed(4)}</td>
                   <td style={{ color: isArb ? '#22c55e' : '#e2e8f0', fontWeight: isArb ? 600 : 400 }}>{row.combined.toFixed(4)}</td>

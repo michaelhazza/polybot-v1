@@ -232,7 +232,7 @@ function RunDetail({ runId, onBack }) {
                       return (
                         <tr key={window.id}>
                           <td style={{ fontSize: '0.875rem' }}>
-                            {startDate.toLocaleString()}
+                            {startDate.toLocaleString('en-AU')}
                           </td>
                           <td>{window.duration}s</td>
                           <td>{window.entry_combined_price?.toFixed(4)}</td>

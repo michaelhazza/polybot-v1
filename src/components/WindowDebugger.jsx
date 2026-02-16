@@ -2,7 +2,7 @@ import React from 'react';
 
 function WindowDebugger({ window, onClose }) {
   const formatTimestamp = (ts) => {
-    return new Date(ts * 1000).toLocaleString();
+    return new Date(ts * 1000).toLocaleString('en-AU');
   };
 
   const edge = ((1 - window.min_combined_price) * 100).toFixed(3);
